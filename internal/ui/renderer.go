@@ -37,6 +37,9 @@ type Frame struct {
 	World *sim.World
 	// Alpha is the fraction [0,1) between the last sim tick and the next.
 	Alpha float64
+	// Focused reports whether the game is receiving keyboard input. In a
+	// browser this is false until the page (or itch.io iframe) is clicked.
+	Focused bool
 }
 
 // Renderer draws frames. Render-only animation (flicker, idle spin) uses its
@@ -136,7 +139,12 @@ func (r *Renderer) Draw(screen *ebiten.Image, f Frame) {
 
 	// HUD (no glow).
 	blink := 0.55 + 0.45*math.Sin(float64(r.frame)*0.08)
-	drawCentered(screen, "PRESS  [ SHIFT ]  TO SHIFT", r.hudFace, cx, float64(r.h)*0.88, withAlpha(colText, blink))
+	prompt := "PRESS  [ SHIFT ]  TO SHIFT"
+	if !f.Focused {
+		prompt = "CLICK TO FOCUS,  THEN PRESS  [ SHIFT ]"
+		blink = 0.75 + 0.25*math.Sin(float64(r.frame)*0.15)
+	}
+	drawCentered(screen, prompt, r.hudFace, cx, float64(r.h)*0.88, withAlpha(colText, blink))
 	hud := fmt.Sprintf("M0 BUILD   tick %d   %d tps sim   shifts %d", w.Tick, sim.TicksPerSecond, w.Shifts)
 	drawLeft(screen, hud, r.hudFace, 16, float64(r.h)-28, colDim)
 	drawRight(screen, "GITHUB GAME OFF 2026  ·  THEME: SHIFT", r.hudFace, float64(r.w)-16, float64(r.h)-28, colDim)

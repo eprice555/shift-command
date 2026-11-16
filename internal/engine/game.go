@@ -78,7 +78,7 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.renderer.Draw(screen, ui.Frame{World: g.world, Alpha: g.clock.Alpha()})
+	g.renderer.Draw(screen, ui.Frame{World: g.world, Alpha: g.clock.Alpha(), Focused: ebiten.IsFocused()})
 	if g.opts.ScreenshotPath != "" && g.updates == g.opts.QuitAfterUpdates {
 		if err := saveScreenshot(screen, g.opts.ScreenshotPath); err != nil {
 			g.err = err

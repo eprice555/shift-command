@@ -18,6 +18,28 @@
 <div id="loading">LOADING&hellip;</div>
 <script src="wasm_exec.js"></script>
 <script>
+// Ebitengine only listens for keys on its <canvas>. If focus lands anywhere
+// else on the page, forward keyboard events to the canvas so input still works.
+(() => {
+  const canvas = () => document.querySelector("canvas");
+  const forward = (e) => {
+    const c = canvas();
+    if (!c || e.target === c) return;
+    e.preventDefault();
+    e.stopPropagation();
+    c.focus();
+    c.dispatchEvent(new KeyboardEvent(e.type, {
+      key: e.key, code: e.code, location: e.location, repeat: e.repeat,
+      shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey,
+      bubbles: true, cancelable: true,
+    }));
+  };
+  window.addEventListener("keydown", forward, true);
+  window.addEventListener("keyup", forward, true);
+  window.addEventListener("pointerdown", () => canvas()?.focus());
+  window.addEventListener("focus", () => canvas()?.focus());
+})();
+
 (async () => {
   const loading = document.getElementById("loading");
   try {

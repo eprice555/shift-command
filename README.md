@@ -20,7 +20,7 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 |---|---|
 | **Shift** | Shift to the next faction form (M0 demo) |
 
-In the browser, click the game once to give it keyboard focus.
+In the browser, click the game once to give it keyboard focus (required on itch.io, where the game runs in an iframe). The game shows a "click to focus" hint whenever it is not receiving keyboard input.
 
 ## Running
 
