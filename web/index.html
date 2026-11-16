@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift Command</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #06070d; }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #3cf0ff; font: bold 20px/1.4 monospace; letter-spacing: 0.3em;
+    text-shadow: 0 0 8px #3cf0ff, 0 0 20px #3cf0ff;
+  }
+  #loading.error { color: #ff5a5a; text-shadow: none; letter-spacing: normal; padding: 2em; text-align: center; }
+</style>
+</head>
+<body>
+<div id="loading">LOADING&hellip;</div>
+<script src="wasm_exec.js"></script>
+<script>
+(async () => {
+  const loading = document.getElementById("loading");
+  try {
+    const go = new Go();
+    let result;
+    try {
+      result = await WebAssembly.instantiateStreaming(fetch("game.wasm"), go.importObject);
+    } catch (_) {
+      // Fallback for hosts that don't serve .wasm as application/wasm.
+      const bytes = await (await fetch("game.wasm")).arrayBuffer();
+      result = await WebAssembly.instantiate(bytes, go.importObject);
+    }
+    loading.remove();
+    window.focus();
+    await go.run(result.instance);
+  } catch (err) {
+    loading.textContent = "Failed to load Shift Command: " + err;
+    loading.className = "error";
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
