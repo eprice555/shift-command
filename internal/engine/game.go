@@ -1,4 +1,4 @@
-// Package engine owns the main loop, camera, and input, and bridges
+// Package engine owns the main loop, scenes, camera, and input, and bridges
 // Ebitengine's update/draw callbacks to the fixed-rate sim.
 package engine
 
@@ -9,7 +9,9 @@ import (
 	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
+	"github.com/eprice555/shift-command/internal/geom"
 	"github.com/eprice555/shift-command/internal/sim"
 	"github.com/eprice555/shift-command/internal/ui"
 )
@@ -28,16 +30,20 @@ type Options struct {
 	QuitAfterUpdates int
 	// ScreenshotPath, if set, saves the frame drawn at QuitAfterUpdates.
 	ScreenshotPath string
-	// AutoShiftTicks injects a Shift press every N sim ticks (0 = off).
-	AutoShiftTicks int
+	// AutoShiftUpdates morphs the title emblem every N updates (0 = off).
+	AutoShiftUpdates int
+	// StartMatch skips the title screen.
+	StartMatch bool
+	// Demo selects the player's army and attack-moves it into the enemy
+	// forward squad (implies StartMatch).
+	Demo bool
 }
 
 // Game implements ebiten.Game.
 type Game struct {
 	opts     Options
-	world    *sim.World
-	clock    *FixedStep
-	pending  []sim.Command
+	title    *ui.Title
+	match    *Match
 	renderer *ui.Renderer
 	updates  int
 	err      error
@@ -49,12 +55,21 @@ func NewGame(opts Options) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Game{
-		opts:     opts,
-		world:    sim.NewWorld(),
-		clock:    NewFixedStep(sim.TicksPerSecond, UpdateTPS),
-		renderer: r,
-	}, nil
+	g := &Game{opts: opts, title: ui.NewTitle(), renderer: r}
+	if opts.StartMatch || opts.Demo {
+		g.startMatch()
+	}
+	return g, nil
+}
+
+func (g *Game) startMatch() {
+	g.match = NewMatch()
+	if g.opts.Demo {
+		m := g.match
+		m.setSelection(m.onScreen(func(*sim.Unit) bool { return true }))
+		m.showHelp, m.follow = false, true
+		m.commandAt(geom.V(46, 34), nil, true)
+	}
 }
 
 func (g *Game) Update() error {
@@ -66,19 +81,29 @@ func (g *Game) Update() error {
 	}
 	g.updates++
 
-	g.pending = pollCommands(g.pending)
-	for range g.clock.Advance() {
-		if n := g.opts.AutoShiftTicks; n > 0 && g.world.Tick%uint64(n) == uint64(n-1) {
-			g.pending = append(g.pending, sim.CmdShift)
-		}
-		g.world.Step(g.pending)
-		g.pending = g.pending[:0]
+	if g.match != nil {
+		g.match.Update()
+		return nil
+	}
+	shift := inpututil.IsKeyJustPressed(ebiten.KeyShiftLeft) || inpututil.IsKeyJustPressed(ebiten.KeyShiftRight)
+	if n := g.opts.AutoShiftUpdates; n > 0 && g.updates%n == 0 {
+		shift = true
+	}
+	g.title.Update(shift)
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) ||
+		inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		g.startMatch()
 	}
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.renderer.Draw(screen, ui.Frame{World: g.world, Alpha: g.clock.Alpha(), Focused: ebiten.IsFocused()})
+	if g.match != nil {
+		g.match.takeFX(g.renderer)
+		g.renderer.DrawMatch(screen, g.match.View())
+	} else {
+		g.renderer.DrawTitle(screen, g.title, ebiten.IsFocused())
+	}
 	if g.opts.ScreenshotPath != "" && g.updates == g.opts.QuitAfterUpdates {
 		if err := saveScreenshot(screen, g.opts.ScreenshotPath); err != nil {
 			g.err = err
