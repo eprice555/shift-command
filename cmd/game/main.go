@@ -14,7 +14,9 @@ func main() {
 	var opts engine.Options
 	flag.IntVar(&opts.QuitAfterUpdates, "updates", 0, "quit after N updates (smoke testing; 0 = run forever)")
 	flag.StringVar(&opts.ScreenshotPath, "screenshot", "", "save a PNG of the final frame (requires -updates)")
-	flag.IntVar(&opts.AutoShiftTicks, "autoshift", 0, "press Shift automatically every N sim ticks (demo)")
+	flag.IntVar(&opts.AutoShiftUpdates, "autoshift", 0, "title screen: press Shift automatically every N updates")
+	flag.BoolVar(&opts.StartMatch, "match", false, "skip the title screen and start the sandbox match")
+	flag.BoolVar(&opts.Demo, "demo", false, "start the match with the army attack-moving into the enemy (implies -match)")
 	flag.Parse()
 
 	ebiten.SetWindowSize(engine.ScreenWidth, engine.ScreenHeight)

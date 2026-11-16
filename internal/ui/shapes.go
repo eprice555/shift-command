@@ -3,10 +3,12 @@ package ui
 import (
 	"image/color"
 	"math"
+
+	"github.com/eprice555/shift-command/internal/geom"
 )
 
 // Vec is a 2D point.
-type Vec struct{ X, Y float64 }
+type Vec = geom.Vec
 
 // EmblemPoints appends n points sampled evenly by angle around a regular
 // polygon with the given side count (0 = circle), circumradius r, rotated by
@@ -23,7 +25,7 @@ func EmblemPoints(dst []Vec, sides, n int, r, rot float64) []Vec {
 			rr = r * math.Cos(math.Pi/float64(sides)) / math.Cos(local)
 		}
 		s, c := math.Sincos(th + rot)
-		dst = append(dst, Vec{c * rr, s * rr})
+		dst = append(dst, geom.V(c*rr, s*rr))
 	}
 	return dst
 }
@@ -31,7 +33,7 @@ func EmblemPoints(dst []Vec, sides, n int, r, rot float64) []Vec {
 // LerpPoints appends the point-wise interpolation of a and b at t.
 func LerpPoints(dst, a, b []Vec, t float64) []Vec {
 	for i := range min(len(a), len(b)) {
-		dst = append(dst, Vec{a[i].X + (b[i].X-a[i].X)*t, a[i].Y + (b[i].Y-a[i].Y)*t})
+		dst = append(dst, a[i].Lerp(b[i], t))
 	}
 	return dst
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/eprice555/shift-command/internal/assets"
 	"github.com/eprice555/shift-command/internal/faction"
-	"github.com/eprice555/shift-command/internal/sim"
 )
 
 var (
@@ -32,20 +31,10 @@ const (
 	titleTrack  = 10.0
 )
 
-// Frame is everything the renderer needs for one draw.
-type Frame struct {
-	World *sim.World
-	// Alpha is the fraction [0,1) between the last sim tick and the next.
-	Alpha float64
-	// Focused reports whether the game is receiving keyboard input. In a
-	// browser this is false until the page (or itch.io iframe) is clicked.
-	Focused bool
-}
-
-// Renderer draws frames. Render-only animation (flicker, idle spin) uses its
-// own frame counter and never feeds back into the sim.
+// Renderer draws the title screen and matches. Render-only animation
+// (flicker, effects) uses its own frame counter and never feeds the sim.
 type Renderer struct {
-	titleFace, labelFace, hudFace text.Face
+	titleFace, labelFace, hudFace, smallFace text.Face
 
 	w, h  int
 	grid  *ebiten.Image
@@ -54,6 +43,9 @@ type Renderer struct {
 
 	ptsA, ptsB, pts []Vec
 	path            vector.Path
+
+	match matchCache
+	fx    effects
 }
 
 // NewRenderer loads fonts and prepares a renderer.
@@ -70,6 +62,7 @@ func NewRenderer() (*Renderer, error) {
 		titleFace: &text.GoTextFace{Source: bold, Size: 96},
 		labelFace: &text.GoTextFace{Source: bold, Size: 28},
 		hudFace:   &text.GoTextFace{Source: mono, Size: 16},
+		smallFace: &text.GoTextFace{Source: mono, Size: 13},
 	}, nil
 }
 
@@ -96,17 +89,16 @@ func (r *Renderer) ensureTargets(w, h int) {
 	}
 }
 
-// Draw renders one frame.
-func (r *Renderer) Draw(screen *ebiten.Image, f Frame) {
+// DrawTitle renders the title screen.
+func (r *Renderer) DrawTitle(screen *ebiten.Image, ti *Title, focused bool) {
 	r.frame++
 	b := screen.Bounds()
 	r.ensureTargets(b.Dx(), b.Dy())
 	cx := float64(r.w) / 2
 
-	w := f.World
-	progress := w.MorphProgress(f.Alpha)
+	progress := ti.Progress()
 	t := EaseInOutCubic(progress)
-	from, to := faction.Get(w.PrevForm), faction.Get(w.Form)
+	from, to := faction.Get(ti.PrevForm), faction.Get(ti.Form)
 	col := LerpColor(from.Color, to.Color, t)
 
 	screen.Fill(colBackground)
@@ -123,7 +115,7 @@ func (r *Renderer) Draw(screen *ebiten.Image, f Frame) {
 	r.buildEmblem(from, to, t, 92)
 	r.strokeEmblem(em, ecx, ecy, 5, col)
 	r.drawOrbit(em, ecx, ecy, 132, col)
-	if w.Morphing() {
+	if ti.Morphing() {
 		rad := 92 + 150*progress
 		a := float32(1 - progress)
 		vector.StrokeCircle(em, float32(ecx), float32(ecy), float32(rad), 3, scaleRGB(col, float64(a)), true)
@@ -139,13 +131,13 @@ func (r *Renderer) Draw(screen *ebiten.Image, f Frame) {
 
 	// HUD (no glow).
 	blink := 0.55 + 0.45*math.Sin(float64(r.frame)*0.08)
-	prompt := "PRESS  [ SHIFT ]  TO SHIFT"
-	if !f.Focused {
-		prompt = "CLICK TO FOCUS,  THEN PRESS  [ SHIFT ]"
+	prompt := "[ SHIFT ]  TO SHIFT   ·   [ ENTER ] / CLICK  TO DEPLOY"
+	if !focused {
+		prompt = "CLICK TO FOCUS AND DEPLOY  ·  [ SHIFT ] TO SHIFT"
 		blink = 0.75 + 0.25*math.Sin(float64(r.frame)*0.15)
 	}
 	drawCentered(screen, prompt, r.hudFace, cx, float64(r.h)*0.88, withAlpha(colText, blink))
-	hud := fmt.Sprintf("M0 BUILD   tick %d   %d tps sim   shifts %d", w.Tick, sim.TicksPerSecond, w.Shifts)
+	hud := fmt.Sprintf("M1 BUILD   shifts %d", ti.Shifts)
 	drawLeft(screen, hud, r.hudFace, 16, float64(r.h)-28, colDim)
 	drawRight(screen, "GITHUB GAME OFF 2026  ·  THEME: SHIFT", r.hudFace, float64(r.w)-16, float64(r.h)-28, colDim)
 }
