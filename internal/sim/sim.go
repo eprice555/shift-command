@@ -65,6 +65,7 @@ type World struct {
 	Map   *world.Map
 	Units []*Unit // live units in ID order
 	Fog   [NumPlayers]*world.Fog
+	Creep [NumPlayers]*Creep
 	// Events lists what happened during the most recent Step.
 	Events []Event
 
@@ -96,6 +97,7 @@ func NewWorld(m *world.Map) *World {
 	w := &World{Map: m, byID: map[UnitID]*Unit{}, resByID: map[ResourceID]*Resource{}, nextID: 1, nextRes: 1}
 	for i := range w.Fog {
 		w.Fog[i] = world.NewFog(m.W, m.H)
+		w.Creep[i] = newCreep(m.W, m.H)
 		w.Seen[i] = map[UnitID]Ghost{}
 	}
 	w.addResources()
@@ -212,11 +214,13 @@ func (w *World) Step(cmds []Command) {
 	// decides who shoots first.
 	// Negative damage is healing or repair.
 	for _, h := range w.hits {
-		if t := w.byID[h.target]; t != nil {
+		if t := w.byID[h.target]; t != nil && !t.consumed {
 			t.HP = min(t.HP-h.damage, max(t.HP, t.Def.HP))
 		}
 	}
+	w.regenerate()
 	w.removeDead()
+	w.updateCreep(false)
 	w.updateFog()
 	w.recount()
 	w.checkOver()
@@ -234,7 +238,9 @@ func (w *World) removeDead() {
 		if u.Def.Building && !u.lifted {
 			w.Map.Occupy(u.TileX, u.TileY, u.Def.Size, -1)
 		}
-		w.Events = append(w.Events, Event{Kind: EvDeath, Owner: u.Owner, Type: u.Type, From: u.Pos})
+		if !u.consumed {
+			w.Events = append(w.Events, Event{Kind: EvDeath, Owner: u.Owner, Type: u.Type, From: u.Pos})
+		}
 	}
 	clear(w.Units[len(live):])
 	w.Units = live

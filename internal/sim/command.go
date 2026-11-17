@@ -21,7 +21,7 @@ const (
 	CmdGather                        // workers: gather Res
 	CmdBuild                         // one worker: build Type at tile (TX, TY)
 	CmdTrain                         // buildings: queue Type at the least busy one
-	CmdCancel                        // first building: cancel construction or queue entry Index (-1 = last)
+	CmdCancel                        // first building: cancel construction or queue entry Index (-1 = last); else all cocoons
 	CmdRally                         // buildings: rally new units to Point (or Res)
 	CmdAssist                        // workers: construct/repair Target or bank cargo there; others move to it
 	CmdShift                         // toggle SHIFT modes (Index -1), or set mode Index (0 base, 1 shifted)
@@ -69,6 +69,12 @@ func (w *World) apply(c *Command) {
 				return
 			}
 		}
+		// No building selected: every selected cocoon reverts to Spawn.
+		for _, u := range all {
+			if u.Morphing() {
+				w.cancel(c.Player, u, 0)
+			}
+		}
 		return
 	case CmdShift:
 		w.shift(c, all)
@@ -106,7 +112,7 @@ func (w *World) apply(c *Command) {
 			return
 		}
 		if r.Kind == world.Flux && !w.mineable(c.Player, r) {
-			w.notice(c.Player, NoticeNeedVent, faction.Extractor)
+			w.notice(c.Player, NoticeNeedVent, faction.Get(w.Players[c.Player].Faction).Extractor)
 			return
 		}
 		for _, u := range units {
@@ -127,7 +133,7 @@ func (w *World) apply(c *Command) {
 		}
 		for _, u := range units {
 			switch {
-			case u.Def.Worker && t.Def.Building && !t.Complete:
+			case u.Def.Worker && t.Def.Building && !t.Complete && !t.Def.SelfBuild:
 				w.give(u, Order{Kind: OrderConstruct, Target: t.ID}, c.Queue)
 			case u.Def.Worker && t.Def.DropOff && u.Cargo > 0:
 				w.give(u, Order{Kind: OrderReturn}, c.Queue)

@@ -11,6 +11,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
+	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
 	"github.com/eprice555/shift-command/internal/sim"
 	"github.com/eprice555/shift-command/internal/ui"
@@ -41,6 +42,8 @@ type Options struct {
 	SkipSeconds int
 	// Reveal starts the match with fog of war off.
 	Reveal bool
+	// Faction is the player's starting faction choice on the title screen.
+	Faction faction.ID
 }
 
 // Game implements ebiten.Game.
@@ -60,6 +63,9 @@ func NewGame(opts Options) (*Game, error) {
 		return nil, err
 	}
 	g := &Game{opts: opts, title: ui.NewTitle(), renderer: r}
+	if faction.Get(opts.Faction).Playable {
+		g.title.Form, g.title.PrevForm = opts.Faction, opts.Faction
+	}
 	if opts.StartMatch || opts.Demo {
 		g.startMatch()
 	}
@@ -67,7 +73,7 @@ func NewGame(opts Options) (*Game, error) {
 }
 
 func (g *Game) startMatch() {
-	g.match = NewMatch(g.opts.Demo)
+	g.match = NewMatch(g.opts.Demo, g.title.Form)
 	if g.opts.Demo {
 		m := g.match
 		m.setSelection(m.onScreen(func(*sim.Unit) bool { return true }))

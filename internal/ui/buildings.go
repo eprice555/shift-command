@@ -55,8 +55,13 @@ func ngon(c geom.Vec, rad float64, n int, a0 float64) []geom.Vec {
 }
 
 // buildingOutline adds b's footprint (and, when finished, its type detail)
-// to the fill and stroke paths in screen space.
-func buildingOutline(fill, stroke *vector.Path, t faction.UnitType, rect geom.Rect, complete bool, cam *Camera) {
+// to the fill and stroke paths in screen space. frac is construction
+// progress and wob a wobble phase for organic (Brood) buildings.
+func buildingOutline(fill, stroke *vector.Path, t faction.UnitType, rect geom.Rect, complete bool, frac, wob float64, cam *Camera) {
+	if isBrood(t) {
+		broodBuilding(fill, stroke, t, rect, complete, frac, wob, cam)
+		return
+	}
 	const inset = 0.12
 	a := cam.ToScreenV(rect.Min.Add(geom.V(inset, inset)))
 	b := cam.ToScreenV(rect.Max.Sub(geom.V(inset, inset)))
@@ -147,7 +152,7 @@ func (r *Renderer) drawGhosts(screen *ebiten.Image, v *MatchView) {
 			continue
 		}
 		rect := world.TileRect(g.TileX, g.TileY, faction.Unit(g.Type).Size)
-		buildingOutline(nil, &path, g.Type, rect, g.Complete, v.Cam)
+		buildingOutline(nil, &path, g.Type, rect, g.Complete, 0.5, 0, v.Cam)
 	}
 	sop := &vector.StrokeOptions{Width: 1.5, LineJoin: vector.LineJoinRound}
 	dop := &vector.DrawPathOptions{AntiAlias: true}
@@ -180,7 +185,7 @@ func (r *Renderer) drawPlacement(screen *ebiten.Image, v *MatchView) {
 	b := cam.ToScreenV(rect.Max)
 	vector.FillRect(screen, float32(a.X), float32(a.Y), float32(b.X-a.X), float32(b.Y-a.Y), withAlpha(col, 0.16), false)
 	var path vector.Path
-	buildingOutline(nil, &path, v.PlaceType, rect, true, cam)
+	buildingOutline(nil, &path, v.PlaceType, rect, true, 1, float64(r.frame)*0.06, cam)
 	sop := &vector.StrokeOptions{Width: 2, LineJoin: vector.LineJoinRound}
 	dop := &vector.DrawPathOptions{AntiAlias: true}
 	dop.ColorScale.ScaleWithColor(col)
@@ -198,6 +203,9 @@ func noticeText(n sim.Notice, w *sim.World, p sim.PlayerID, t faction.UnitType) 
 		if req, ok := w.Missing(p, t); ok {
 			return "Requires " + faction.Unit(req).Name
 		}
+	}
+	if n == sim.NoticeSupply {
+		return "Supply blocked: build a " + faction.Unit(faction.Get(w.Players[p].Faction).Supply).Name
 	}
 	return n.String()
 }
@@ -237,7 +245,14 @@ func drawCargo(em *ebiten.Image, v *MatchView, u *sim.Unit, pos geom.Vec, facing
 // drawBuildBars shows construction and production progress on own buildings.
 func drawBuildBars(screen *ebiten.Image, v *MatchView, vis geom.Rect) {
 	for _, u := range v.World.Units {
-		if !u.Def.Building || u.Owner != v.Player || !vis.Contains(u.Pos) {
+		if u.Owner != v.Player || !vis.Contains(u.Pos) {
+			continue
+		}
+		if u.Morphing() {
+			drawUnitBar(screen, v, u, u.MorphFrac(), colBuild)
+			continue
+		}
+		if !u.Def.Building {
 			continue
 		}
 		var frac float64

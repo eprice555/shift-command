@@ -103,6 +103,30 @@ func shortName(t faction.UnitType) string {
 		return "MENDR"
 	case faction.Rigger:
 		return "RIGGR"
+	case faction.Hive:
+		return "HIVE"
+	case faction.NestPod:
+		return "NEST"
+	case faction.BroodExtractor:
+		return "EXTR"
+	case faction.SpawningPit:
+		return "PIT"
+	case faction.GestationDen:
+		return "DEN"
+	case faction.Drone:
+		return "DRONE"
+	case faction.Biter:
+		return "BITER"
+	case faction.Leaper:
+		return "LEAPR"
+	case faction.Spitter:
+		return "SPITR"
+	case faction.Broodmother:
+		return "MOTHR"
+	case faction.Behemoth:
+		return "BHMTH"
+	case faction.Spawn:
+		return "SPAWN"
 	}
 	return "?"
 }
@@ -119,7 +143,7 @@ func availability(w *sim.World, p sim.PlayerID, t faction.UnitType) (bool, strin
 		return false, sim.NoticeCrystals.String()
 	case pl.Flux < d.Flux:
 		return false, sim.NoticeFlux.String()
-	case !d.Building && d.Supply > 0 && pl.Supply+d.Supply > pl.SupplyCap+1e-9:
+	case !d.Building && d.Supply > 0 && pl.Supply+faction.QueueSupply(t) > pl.SupplyCap+1e-9:
 		return false, sim.NoticeSupply.String()
 	}
 	return true, ""
@@ -129,6 +153,8 @@ func availability(w *sim.World, p sim.PlayerID, t faction.UnitType) (bool, strin
 func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 	var units []*sim.Unit
 	worker, mobile, armed := false, false, false
+	// spawn: every mobile unit is an idle Spawn; cocoon: some are morphing.
+	spawn, cocoon := true, false
 	var building *sim.Unit
 	for _, id := range sel {
 		u := w.Unit(id)
@@ -145,6 +171,8 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 			mobile = true
 			worker = worker || u.Def.Worker
 			armed = armed || u.Def.Armed()
+			spawn = spawn && u.Def.Morphs && !u.Morphing()
+			cocoon = cocoon || u.Morphing()
 		}
 	}
 	if len(units) == 0 {
@@ -158,7 +186,23 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 		}
 		out = append(out, Button{Kind: k, Type: t, Row: row, Col: col, Key: cardKeys[row][col], Label: label, Enabled: ok, Reason: why})
 	}
+	// forms lays out a trains list row by row (Q–T, then A).
+	forms := func(ts []faction.UnitType) {
+		for i, t := range ts {
+			// Row 1 keeps its last two slots for SHIFT and CANCEL.
+			if row, col := i/CardCols, i%CardCols; row == 0 || row == 1 && col < 3 {
+				slot(row, col, ActTrain, t, shortName(t))
+			}
+		}
+	}
 	switch {
+	case mobile && (spawn || cocoon):
+		if spawn {
+			forms(units[0].Def.Trains)
+		}
+		if cocoon {
+			slot(1, 4, ActCancel, 0, "CANCEL")
+		}
 	case mobile:
 		if worker {
 			for i, t := range faction.Buildable(units[0].Def.Faction) {
@@ -174,9 +218,13 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 		slot(1, 2, ActHold, 0, "HOLD")
 	case building != nil:
 		if building.Complete {
-			for i, t := range building.Def.Trains {
-				if i < CardCols {
-					slot(0, i, ActTrain, t, shortName(t))
+			n := len(out)
+			forms(building.Def.Trains)
+			if building.Def.SpawnMax > 0 && w.IdleSpawn(building) == nil {
+				for i := n; i < len(out); i++ {
+					if out[i].Enabled {
+						out[i].Enabled, out[i].Reason = false, "No Spawn ready"
+					}
 				}
 			}
 		}

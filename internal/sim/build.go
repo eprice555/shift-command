@@ -30,6 +30,8 @@ const (
 	NoticeLowHP            // not enough HP to pay for a SHIFT mode
 	NoticeBusy             // building must finish its queue before packing
 	NoticeCantLand         // no clear ground under a packed building
+	NoticeNeedCreep        // Brood building must be placed on creep
+	NoticeNoSpawn          // no idle Spawn to morph
 )
 
 // String is the player-facing text for n.
@@ -40,7 +42,7 @@ func (n Notice) String() string {
 	case NoticeFlux:
 		return "Not enough flux"
 	case NoticeSupply:
-		return "Supply blocked: build a Generator"
+		return "Supply blocked"
 	case NoticeCantBuild:
 		return "Can't build there"
 	case NoticeQueueFull:
@@ -55,6 +57,10 @@ func (n Notice) String() string {
 		return "Finish or cancel production before packing up"
 	case NoticeCantLand:
 		return "Can't land here"
+	case NoticeNeedCreep:
+		return "Must be placed on creep"
+	case NoticeNoSpawn:
+		return "No Spawn ready: the Hive hatches one every 10s"
 	}
 	return ""
 }
@@ -163,6 +169,9 @@ func (w *World) siteNotice(p PlayerID, def faction.UnitDef, x, y int) Notice {
 				return NoticeCantBuild
 			}
 		}
+	}
+	if def.NeedsCreep && !w.onCreep(p, def.Size, x, y) {
+		return NoticeNeedCreep
 	}
 	return NoticeNone
 }
@@ -295,6 +304,12 @@ func (w *World) build(u *Unit, o *Order) geom.Vec {
 	}
 	w.pay(u.Owner, def)
 	b := w.PlaceBuilding(u.Owner, o.Build, o.TX, o.TY, false)
+	if def.SelfBuild {
+		// The worker morphs into the building, which grows on its own.
+		w.Events = append(w.Events, Event{Kind: EvUnitReady, Owner: u.Owner, Type: b.Type, From: b.Pos})
+		w.consume(u)
+		return geom.Vec{}
+	}
 	*o = Order{Kind: OrderConstruct, Target: b.ID}
 	u.resetNav()
 	return geom.Vec{}
@@ -313,16 +328,8 @@ func (w *World) construct(u *Unit, o *Order) geom.Vec {
 	}
 	u.Facing = b.Pos.Sub(u.Pos).Angle()
 	u.working = true
-	if b.builtTick == w.Tick+1 {
-		return geom.Vec{}
-	}
-	b.builtTick = w.Tick + 1
-	total := ticksFor(b.Def.BuildTime)
-	b.Progress++
-	b.HP = min(b.Def.HP, b.HP+b.Def.HP*0.9/float64(total))
-	if b.Progress >= total {
-		b.Complete, b.Progress = true, 0
-		w.Events = append(w.Events, Event{Kind: EvBuildingDone, Owner: b.Owner, Type: b.Type, From: b.Pos})
+	w.grow(b)
+	if b.Complete {
 		w.finishWork(u, b)
 	}
 	return geom.Vec{}
@@ -434,28 +441,30 @@ func (w *World) produce(b *Unit) {
 	}
 	nu := w.Spawn(b.Owner, t, w.approach(toward, def.Radius, b.Rect()))
 	w.Events = append(w.Events, Event{Kind: EvUnitReady, Owner: b.Owner, Type: t, From: nu.Pos})
-	r := w.resByID[b.RallyRes]
-	switch {
-	case def.Worker && b.HasRally && r != nil:
-		nu.Orders = append(nu.Orders, Order{Kind: OrderGather, Res: r.ID})
-	case b.HasRally:
-		nu.Orders = append(nu.Orders, Order{Kind: OrderMove, Point: w.Map.SnapPassable(b.Rally)})
-	case def.Worker:
-		if r := w.findResource(nu, world.Crystal, b.Pos); r != nil {
-			nu.Orders = append(nu.Orders, Order{Kind: OrderGather, Res: r.ID})
-		}
-	}
+	w.sendOff(nu, b)
 }
 
-// train queues t at the least busy eligible building in bs.
+// train queues t at the least busy eligible building in bs. Brood forms
+// are morphed instead: one idle Spawn (selected directly, or belonging to
+// a selected Hive) cocoons per command.
 func (w *World) train(p PlayerID, bs []*Unit, t faction.UnitType) {
 	def := faction.Unit(t)
 	if def.Building {
 		return
 	}
 	var best *Unit
+	noSpawn := false
 	for _, b := range bs {
 		if !b.Complete || !trains(b.Def, t) {
+			continue
+		}
+		switch {
+		case b.Def.SpawnMax > 0:
+			if b = w.IdleSpawn(b); b == nil {
+				noSpawn = true
+				continue
+			}
+		case b.Def.Morphs && b.Morphing():
 			continue
 		}
 		if best == nil || len(b.Queue) < len(best.Queue) {
@@ -463,6 +472,9 @@ func (w *World) train(p PlayerID, bs []*Unit, t faction.UnitType) {
 		}
 	}
 	if best == nil {
+		if noSpawn {
+			w.notice(p, NoticeNoSpawn, t)
+		}
 		return
 	}
 	if len(best.Queue) >= MaxQueue {
@@ -474,8 +486,9 @@ func (w *World) train(p PlayerID, bs []*Unit, t faction.UnitType) {
 		return
 	}
 	pl := &w.Players[p]
-	if pl.Supply+def.Supply > pl.SupplyCap {
-		w.notice(p, NoticeSupply, t)
+	supply := faction.QueueSupply(t)
+	if pl.Supply+supply > pl.SupplyCap+1e-9 {
+		w.notice(p, NoticeSupply, faction.Get(pl.Faction).Supply)
 		return
 	}
 	if n := w.pay(p, def); n != NoticeNone {
@@ -483,7 +496,10 @@ func (w *World) train(p PlayerID, bs []*Unit, t faction.UnitType) {
 		return
 	}
 	best.Queue = append(best.Queue, t)
-	pl.Supply += def.Supply
+	if !best.Def.Building {
+		best.clearOrders()
+	}
+	pl.Supply += supply
 }
 
 func trains(d faction.UnitDef, t faction.UnitType) bool {
@@ -498,12 +514,17 @@ func trains(d faction.UnitDef, t faction.UnitType) bool {
 // cancel aborts an unfinished building (partial refund) or removes queue
 // entry i (-1 for the last) with a full refund.
 func (w *World) cancel(p PlayerID, b *Unit, i int) {
-	if !b.Def.Building {
+	if !b.Def.Building && !b.Morphing() {
 		return
 	}
 	if !b.Complete {
 		w.refund(p, b.Def, CancelRefund)
 		b.HP = 0
+		if b.Def.SelfBuild {
+			// The Drone that became this building crawls back out.
+			d := w.Spawn(p, faction.Get(w.Players[p].Faction).Worker, b.Pos)
+			w.sendOff(d, nil)
+		}
 		return
 	}
 	if len(b.Queue) == 0 {
@@ -514,7 +535,7 @@ func (w *World) cancel(p PlayerID, b *Unit, i int) {
 	}
 	def := faction.Unit(b.Queue[i])
 	w.refund(p, def, 1)
-	w.Players[p].Supply -= def.Supply
+	w.Players[p].Supply -= faction.QueueSupply(b.Queue[i])
 	b.Queue = append(b.Queue[:i], b.Queue[i+1:]...)
 	if i == 0 {
 		b.Progress = 0

@@ -17,8 +17,9 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 - **M2a (economy, base building, production)**: the match is now a real skirmish. Each side starts with a Command Hub and 6 Riggers. Riggers mine Crystals on their own; you build Generators (supply), Extractors on flux vents (Flux), a Drill Yard and a Foundry, then train Troopers, Outriders, Menders, Striders and Bastions. Destroy every enemy building to win. All stats are placeholders.
 - **M2b (enemy AI)**: the enemy Forge now plays. It follows a data-driven build order, mines and takes Flux, adds production, expands to its natural at around 4 minutes, and keeps its supply ahead. It defends its base, gathers an army at a staging point, attacks when the wave is big enough (each wave is bigger than the last), and retreats when a fight turns against it. It scouts expansions to find your buildings. There is one difficulty for now (Easy/Normal/Hard come in M5). When the enemy hits something of yours off-screen, you get an **Under attack!** message and a red ping on the minimap; press **Space** to jump there.
 - **M2c (Forge SHIFT modes)**: press **Shift** (or the SHIFT slot on the command card) to switch the selection's gear-shift mode; see the table below. The enemy AI uses them too: it sieges Bastions and plants Striders near enemies, overdrives Troopers into fights, boosts Outriders while travelling, and packs everything up before retreating. The enemy never relocates its buildings.
+- **M3a (The Brood core)**: the Brood is playable. On the title screen, press **Shift** to pick your faction (Forge or Brood), then press **Enter** or click to deploy. The enemy is still a Forge AI until M5. Brood SHIFT abilities (Burrow, Pounce, Root, Brood Burst, Shell) and re-morphing come in M3b.
 
-The title screen still has the M0 demo: press **Shift** to morph between the faction emblems, then press **Enter** or click to deploy.
+The title screen still uses the M0 emblem morph to show the selected faction.
 
 ## How to play
 
@@ -27,6 +28,12 @@ The title screen still has the M0 demo: press **Shift** to morph between the fac
 3. Build an Extractor and send 3 Riggers to it (right click the vent) to collect Flux.
 4. Select a Drill Yard or Foundry and train an army. Right click the ground with the building selected to set its rally point.
 5. The enemy builds up and attacks with waves that grow over time, so build a defense first. Then attack-move into the enemy base and destroy every enemy building.
+
+### Playing the Brood
+
+1. Your **Hive** hatches a **Spawn** every 10 s, up to 3 at a time. Every Brood unit is morphed from a Spawn: select the Hive (or a Spawn) and press **Q W E R T / A** to morph Drone, Biter (a pair), Leaper, Spitter, Broodmother or Behemoth. The Spawn turns into a cocoon; **Esc** cancels it with a refund.
+2. Drones mine like Riggers. A Drone **morphs into a building** and is used up: Nest Pod (+8 supply), Extractor, Spawning Pit, Gestation Den, or another Hive. Every building except the Extractor must be placed on **creep**, the magenta ground that spreads from Hives and other Brood buildings. Cancelling an unfinished building returns the Drone.
+3. Brood units and buildings slowly regenerate HP. The Broodmother also heals nearby wounded allies.
 
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 
@@ -52,7 +59,7 @@ Shift toggles every selected unit type separately: if any unit of a type is in i
 | **Tab** or **F** + click | Add to/toggle selection; with an order, queue it |
 | **Right click** | Move, attack the enemy under the cursor, gather from crystals/vents, or help build/repair your building |
 | **Right click** (building selected) | Set the rally point; a packed building flies there instead |
-| **Q W E R T** | Command card: build (worker selected) or train (building selected) |
+| **Q W E R T** (**A**) | Command card: build (worker selected), train (building selected), or morph (Hive or Spawn selected) |
 | **A**, then left click | Attack-move (click an enemy to attack it) |
 | **S** / **H** | Stop / hold position |
 | **Ctrl** or **Alt** + **0–9** | Set control group (use Alt in the browser, where Ctrl+digit switches tabs) |
@@ -61,8 +68,8 @@ Shift toggles every selected unit type separately: if any unit of a type is in i
 | **Mouse wheel** | Zoom |
 | **Minimap** | Left click/drag: jump camera; right click: move |
 | **Space** | Jump the camera to the last "Under attack!" alert |
-| **Shift** | Faction SHIFT ability: switch the selection's gear-shift modes (see above) |
-| **Esc** | Cancel placement or targeting, then cancel the last queued unit / construction, then deselect |
+| **Shift** | Faction SHIFT ability: switch the selection's gear-shift modes (Forge, see above). On the title screen: pick your faction |
+| **Esc** | Cancel placement or targeting, then cancel the last queued unit / construction / selected cocoons, then deselect |
 | **Click a queue slot** | Cancel that queued unit (refunded) |
 | **F1** | Toggle the controls panel |
 | **F2** / **F3** | Debug: spawn your / an enemy squad at the cursor |
@@ -98,6 +105,7 @@ go run ./cmd/game -autoshift 20                       # title screen: press Shif
 go run ./cmd/game -match                              # skip the title, start the skirmish
 go run ./cmd/game -demo -updates 640 -screenshot fight.png   # M1 sandbox: army attack-moves into the enemy
 go run ./cmd/game -match -skip 200 -reveal                    # fast-forward 200s of AI play, fog off
+go run ./cmd/game -match -faction brood                       # play as the Brood (forge|brood)
 ```
 
 ## Layout

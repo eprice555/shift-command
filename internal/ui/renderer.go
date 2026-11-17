@@ -120,7 +120,7 @@ func (r *Renderer) DrawTitle(screen *ebiten.Image, ti *Title, focused bool) {
 		a := float32(1 - progress)
 		vector.StrokeCircle(em, float32(ecx), float32(ecy), float32(rad), 3, scaleRGB(col, float64(a)), true)
 	}
-	label := strings.ToUpper(to.Name + "  ·  " + to.Shift)
+	label := strings.ToUpper("Play as " + to.Name + "  ·  " + to.Shift)
 	drawCentered(em, label, r.labelFace, cx, float64(r.h)*0.80, scaleRGB(to.Color, 0.9))
 
 	r.bloom.composite(screen)
@@ -131,13 +131,13 @@ func (r *Renderer) DrawTitle(screen *ebiten.Image, ti *Title, focused bool) {
 
 	// HUD (no glow).
 	blink := 0.55 + 0.45*math.Sin(float64(r.frame)*0.08)
-	prompt := "[ SHIFT ]  TO SHIFT   ·   [ ENTER ] / CLICK  TO DEPLOY"
+	prompt := "[ SHIFT ]  CHANGE FACTION   ·   [ ENTER ] / CLICK  TO DEPLOY"
 	if !focused {
-		prompt = "CLICK TO FOCUS AND DEPLOY  ·  [ SHIFT ] TO SHIFT"
+		prompt = "CLICK TO FOCUS AND DEPLOY  ·  [ SHIFT ] CHANGE FACTION"
 		blink = 0.75 + 0.25*math.Sin(float64(r.frame)*0.15)
 	}
 	drawCentered(screen, prompt, r.hudFace, cx, float64(r.h)*0.88, withAlpha(colText, blink))
-	hud := fmt.Sprintf("M2c BUILD   shifts %d", ti.Shifts)
+	hud := fmt.Sprintf("M3a BUILD   shifts %d", ti.Shifts)
 	drawLeft(screen, hud, r.hudFace, 16, float64(r.h)-28, colDim)
 	drawRight(screen, "GITHUB GAME OFF 2026  ·  THEME: SHIFT", r.hudFace, float64(r.w)-16, float64(r.h)-28, colDim)
 }

@@ -3,15 +3,16 @@ package engine
 import (
 	"testing"
 
+	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
 )
 
 func TestUnderAttackAlert(t *testing.T) {
-	m := NewMatch(false)
+	m := NewMatch(false, faction.Forge)
 	if m.ai == nil {
 		t.Fatal("skirmish has no AI opponent")
 	}
-	if NewMatch(true).ai != nil {
+	if NewMatch(true, faction.Forge).ai != nil {
 		t.Fatal("sandbox should have no AI opponent")
 	}
 	far := m.world.Map.Starts[1-m.player]

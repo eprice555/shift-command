@@ -68,7 +68,7 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v *MatchView) {
 	world := v.World
 
 	// Top-left status.
-	workers, army, buildings := 0, 0, 0
+	workers, army, buildings, spawn := 0, 0, 0, 0
 	for _, u := range world.Units {
 		switch {
 		case u.Owner != v.Player:
@@ -76,6 +76,8 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v *MatchView) {
 			buildings++
 		case u.Def.Worker:
 			workers++
+		case u.Def.Morphs:
+			spawn++
 		default:
 			army++
 		}
@@ -86,7 +88,11 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v *MatchView) {
 		mode = "SANDBOX"
 	}
 	drawLeft(screen, fmt.Sprintf("%s  ·  %s", strings.ToUpper(world.Map.Name), mode), r.hudFace, 16, 20, colText)
-	drawLeft(screen, fmt.Sprintf("WORKERS %d   ARMY %d   BUILDINGS %d   %02d:%02d", workers, army, buildings, secs/60, secs%60), r.smallFace, 16, 42, colDim)
+	counts := fmt.Sprintf("WORKERS %d   ARMY %d   BUILDINGS %d", workers, army, buildings)
+	if world.Players[v.Player].Faction == faction.Brood {
+		counts = fmt.Sprintf("WORKERS %d   SPAWN %d   ARMY %d   BUILDINGS %d", workers, spawn, army, buildings)
+	}
+	drawLeft(screen, fmt.Sprintf("%s   %02d:%02d", counts, secs/60, secs%60), r.smallFace, 16, 42, colDim)
 	if v.RevealAll {
 		drawLeft(screen, "FOG OFF (F4)", r.smallFace, 16, 60, colHPMid)
 	}
@@ -137,8 +143,18 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 	switch len(units) {
 	case 0:
 		drawLeft(screen, "NO SELECTION", r.hudFace, x, y, colDim)
-		drawLeft(screen, "Riggers mine crystals on their own. Select one and press", r.smallFace, x, y+26, colDim)
-		drawLeft(screen, "Q-T to build. Select the Hub and press Q to train Riggers.", r.smallFace, x, y+44, colDim)
+		help := [2]string{
+			"Riggers mine crystals on their own. Select one and press",
+			"Q-T to build. Select the Hub and press Q to train Riggers.",
+		}
+		if v.World.Players[v.Player].Faction == faction.Brood {
+			help = [2]string{
+				"Drones mine on their own and morph into buildings (Q-T,",
+				"on creep). Select the Hive and press Q-T/A to morph Spawn.",
+			}
+		}
+		drawLeft(screen, help[0], r.smallFace, x, y+26, colDim)
+		drawLeft(screen, help[1], r.smallFace, x, y+44, colDim)
 		drawLeft(screen, "Destroy every enemy building to win.", r.smallFace, x, y+62, colDim)
 	case 1:
 		u := units[0]
@@ -146,7 +162,7 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 			r.drawBuildingPanel(screen, v, u, box)
 			return
 		}
-		col := PlayerColor(u.Owner, v.Player)
+		col := PlayerColor(v.World, u.Owner, v.Player)
 		d := u.Def
 		drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, col)
 		drawRight(screen, unitState(u), r.smallFace, box.Max.X-14, y, colDim)
@@ -183,7 +199,7 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.Unit, box geom.Rect) {
 	x, y := box.Min.X+14, box.Min.Y+18
 	d := u.Def
-	drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, PlayerColor(u.Owner, v.Player))
+	drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, PlayerColor(v.World, u.Owner, v.Player))
 	drawRight(screen, unitState(u), r.smallFace, box.Max.X-14, y, colDim)
 	stats := fmt.Sprintf("HP %.0f/%.0f   ARMOR %g", math.Max(u.HP, 0), d.HP, d.Armor)
 	if d.SupplyProvided > 0 {
@@ -201,7 +217,23 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 		vector.FillRect(screen, float32(bx), float32(by+12), float32(bw*frac), 4, colBuild, false)
 	}
 	if !u.Complete {
-		bar(fmt.Sprintf("CONSTRUCTING  %d%%", int(u.BuildFrac()*100)), u.BuildFrac(), x, y+46)
+		verb := "CONSTRUCTING"
+		if d.SelfBuild {
+			verb = "GROWING"
+		}
+		bar(fmt.Sprintf("%s  %d%%", verb, int(u.BuildFrac()*100)), u.BuildFrac(), x, y+46)
+		return
+	}
+	if d.SpawnMax > 0 {
+		n := v.World.SpawnCount(u)
+		label := fmt.Sprintf("SPAWN %d/%d · FULL", n, d.SpawnMax)
+		frac := 1.0
+		if n < d.SpawnMax {
+			label = fmt.Sprintf("SPAWN %d/%d · NEXT HATCHING %d%%", n, d.SpawnMax, int(u.HatchFrac()*100))
+			frac = u.HatchFrac()
+		}
+		bar(label, frac, x, y+46)
+		drawLeft(screen, "Q-T/A morph a Spawn · right-click sets rally", r.smallFace, x, y+80, colDim)
 		return
 	}
 	if len(d.Trains) == 0 {
@@ -234,7 +266,7 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 		path.Close()
 		sop := &vector.StrokeOptions{Width: 1.5, LineJoin: vector.LineJoinRound}
 		dop := &vector.DrawPathOptions{AntiAlias: true}
-		dop.ColorScale.ScaleWithColor(PlayerColor(u.Owner, v.Player))
+		dop.ColorScale.ScaleWithColor(PlayerColor(v.World, u.Owner, v.Player))
 		vector.StrokePath(screen, &path, sop, dop)
 	}
 	q0 := QueueSlotRect(box, sim.MaxQueue)
@@ -247,6 +279,9 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 
 // unitState describes what u is doing, led by its SHIFT mode.
 func unitState(u *sim.Unit) string {
+	if u.Morphing() {
+		return fmt.Sprintf("MORPHING INTO %s · %d%%", strings.ToUpper(faction.Unit(u.Queue[0]).Name), int(u.MorphFrac()*100))
+	}
 	m := faction.Unit(u.Type).Shift
 	switch {
 	case m == nil:
@@ -275,6 +310,9 @@ func baseState(u *sim.Unit) string {
 	if u.Def.Building {
 		switch {
 		case !u.Complete:
+			if u.Def.SelfBuild {
+				return "GROWING"
+			}
 			return "UNDER CONSTRUCTION"
 		case len(u.Queue) > 0:
 			return fmt.Sprintf("TRAINING · %d QUEUED", len(u.Queue))
@@ -442,7 +480,7 @@ func (r *Renderer) drawGameOver(screen *ebiten.Image, v *MatchView) {
 	case world.Draw:
 		title, col = "DRAW", colText
 	case world.Winner == v.Player:
-		title, col = "VICTORY", PlayerColor(v.Player, v.Player)
+		title, col = "VICTORY", PlayerColor(v.World, v.Player, v.Player)
 	}
 	drawCentered(screen, title, r.titleFace, w/2, h*0.4, col)
 	secs := int(world.Tick / sim.TicksPerSecond)
@@ -553,7 +591,7 @@ func (r *Renderer) drawMinimap(screen *ebiten.Image, v *MatchView, mm geom.Rect)
 		if !unitVisible(v, u) {
 			continue
 		}
-		col := PlayerColor(u.Owner, v.Player)
+		col := PlayerColor(v.World, u.Owner, v.Player)
 		if isSelected(v, u.ID) {
 			col = colSelect
 		}

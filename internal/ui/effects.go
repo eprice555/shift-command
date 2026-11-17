@@ -106,7 +106,7 @@ func (e *effects) draw(em *ebiten.Image, v *MatchView, frame int) {
 		t := float64(age) / float64(f.life)
 		fade := 1 - t
 		ax, ay := cam.ToScreen(f.a)
-		col := PlayerColor(f.owner, v.Player)
+		col := PlayerColor(v.World, f.owner, v.Player)
 		switch f.kind {
 		case fxShot:
 			if fogged(f.a) && fogged(f.b) {

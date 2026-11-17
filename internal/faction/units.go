@@ -83,6 +83,20 @@ const (
 	DrillYard
 	Foundry
 
+	// The Brood.
+	Spawn
+	Drone
+	Biter
+	Leaper
+	Spitter
+	Broodmother
+	Behemoth
+	Hive
+	NestPod
+	BroodExtractor
+	SpawningPit
+	GestationDen
+
 	UnitTypeCount
 )
 
@@ -114,12 +128,19 @@ type UnitDef struct {
 	Mech bool // can be repaired (Rigger)
 
 	Worker    bool    // gathers, constructs, repairs
+	Regen     float64 // HP per second regenerated while complete (Brood)
 	HealRate  float64 // HP per second to a nearby damaged Bio ally
 	HealRange float64
 	HealAura  bool // heal every damaged Bio ally in HealRange at once
 
 	// Shift is the unit's SHIFT mode, or nil if it has none.
 	Shift *Mode
+
+	// Brood morphing. A Morphs unit (Spawn) turns into one of its Trains
+	// forms in place; Spawns is how many units one morph yields (Biters
+	// hatch in pairs; 0 means 1). Cost is per morph, Supply per unit.
+	Morphs bool
+	Spawns int
 
 	// Buildings.
 	Building       bool
@@ -129,6 +150,20 @@ type UnitDef struct {
 	OnVent         bool       // must be placed on a flux vent
 	Trains         []UnitType // units this building produces
 	Requires       []UnitType // completed buildings needed to build/train this
+
+	SelfBuild  bool    // the worker is consumed and the building grows on its own (Brood)
+	NeedsCreep bool    // the whole footprint must be on its owner's creep
+	Creep      float64 // creep radius spread once complete
+	SpawnMax   int     // a Hive keeps up to this many idle Spawn
+}
+
+// Yield is how many units one train/morph of d produces.
+func (d UnitDef) Yield() int { return max(1, d.Spawns) }
+
+// QueueSupply is the supply one train/morph of t reserves.
+func QueueSupply(t UnitType) float64 {
+	d := Unit(t)
+	return d.Supply * float64(d.Yield())
 }
 
 // Armed reports whether the def has a weapon.
@@ -273,7 +308,102 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		Building: true, Size: 3, Trains: []UnitType{Strider, Bastion}, Requires: []UnitType{DrillYard},
 		Shift: &Mode{Name: "Packed", Desc: "Pack up and fly to a new site; SHIFT again to land", Base: "Landed", Time: 1.5, Pack: true, FlySpeed: 1.4},
 	},
+
+	Spawn: {
+		Type: Spawn, Faction: Brood, Name: "Spawn", Role: "Larva: morphs into any unlocked Brood form",
+		BuildTime: SpawnTime,
+		HP:        25, Armor: 6, ArmorType: Light, Radius: 0.26, Sight: 4, Bio: true, Regen: broodUnitRegen,
+		Morphs: true, Trains: broodForms,
+	},
+	Drone: {
+		Type: Drone, Faction: Brood, Name: "Drone", Role: "Worker: gathers, morphs into buildings",
+		Crystals: 50, Supply: 1, BuildTime: 12,
+		HP: 40, ArmorType: Light, Radius: 0.34, Speed: 2.8, Sight: 7, Bio: true, Worker: true, Regen: broodUnitRegen,
+		Weapon: Weapon{Damage: 5, Type: Normal, Range: 0.2, Cooldown: 1.2},
+	},
+	Biter: {
+		Type: Biter, Faction: Brood, Name: "Biter", Role: "Fast melee swarm (hatch in pairs)",
+		Crystals: 50, Supply: 0.5, BuildTime: 16, Spawns: 2,
+		HP: 35, ArmorType: Light, Radius: 0.28, Speed: 4, Sight: 7, Bio: true, Regen: broodUnitRegen,
+		Weapon:   Weapon{Damage: 5, Type: Normal, Range: 0.15, Cooldown: 0.7},
+		Requires: []UnitType{SpawningPit},
+	},
+	Leaper: {
+		Type: Leaper, Faction: Brood, Name: "Leaper", Role: "Raider: hard-hitting melee",
+		Crystals: 50, Flux: 25, Supply: 1, BuildTime: 18,
+		HP: 55, ArmorType: Light, Radius: 0.36, Speed: 3.6, Sight: 8, Bio: true, Regen: broodUnitRegen,
+		Weapon:   Weapon{Damage: 9, Type: Normal, Range: 0.25, Cooldown: 0.9},
+		Requires: []UnitType{SpawningPit},
+	},
+	Spitter: {
+		Type: Spitter, Faction: Brood, Name: "Spitter", Role: "Ranged acid",
+		Crystals: 75, Flux: 25, Supply: 2, BuildTime: 22,
+		HP: 85, ArmorType: Light, Radius: 0.45, Speed: 2.6, Sight: 8, Bio: true, Regen: broodUnitRegen,
+		Weapon:   Weapon{Damage: 11, Type: Normal, Range: 5, Cooldown: 1.2},
+		Requires: []UnitType{SpawningPit},
+	},
+	Broodmother: {
+		Type: Broodmother, Faction: Brood, Name: "Broodmother", Role: "Support: spits and transfuses HP to the brood",
+		Crystals: 100, Flux: 100, Supply: 2, BuildTime: 30,
+		HP: 160, Armor: 1, ArmorType: Armored, Radius: 0.6, Speed: 2.4, Sight: 9, Bio: true, Regen: broodUnitRegen,
+		Weapon:   Weapon{Damage: 8, Type: Normal, Range: 4, Cooldown: 1.2},
+		HealRate: 6, HealRange: 3,
+		Requires: []UnitType{GestationDen},
+	},
+	Behemoth: {
+		Type: Behemoth, Faction: Brood, Name: "Behemoth", Role: "Heavy melee tank",
+		Crystals: 200, Flux: 100, Supply: 4, BuildTime: 38,
+		HP: 400, Armor: 2, ArmorType: Armored, Radius: 0.85, Speed: 2.4, Sight: 8, Bio: true, Regen: broodUnitRegen,
+		Weapon:   Weapon{Damage: 25, Type: Normal, Range: 0.4, Cooldown: 1.4},
+		Requires: []UnitType{GestationDen},
+	},
+	Hive: {
+		Type: Hive, Faction: Brood, Name: "Hive", Role: "HQ: hatches Spawn, spreads creep, cargo drop-off",
+		Crystals: 300, BuildTime: 60,
+		HP: 1500, Armor: 1, ArmorType: Armored, Radius: 2, Sight: 10, Regen: broodBuildingRegen,
+		Building: true, Size: 4, SupplyProvided: 10, DropOff: true, Trains: broodForms,
+		SelfBuild: true, Creep: 9, SpawnMax: 3,
+	},
+	NestPod: {
+		Type: NestPod, Faction: Brood, Name: "Nest Pod", Role: "+8 supply, spreads creep",
+		Crystals: 100, BuildTime: 20,
+		HP: 400, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 7, Regen: broodBuildingRegen,
+		Building: true, Size: 2, SupplyProvided: 8,
+		SelfBuild: true, NeedsCreep: true, Creep: 5,
+	},
+	BroodExtractor: {
+		Type: BroodExtractor, Faction: Brood, Name: "Extractor", Role: "Harvests flux from a vent",
+		Crystals: 25, BuildTime: 20,
+		HP: 450, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 7, Regen: broodBuildingRegen,
+		Building: true, Size: 2, OnVent: true, SelfBuild: true,
+	},
+	SpawningPit: {
+		Type: SpawningPit, Faction: Brood, Name: "Spawning Pit", Role: "Unlocks Biters, Leapers, Spitters",
+		Crystals: 200, BuildTime: 40,
+		HP: 1000, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8, Regen: broodBuildingRegen,
+		Building: true, Size: 3, Requires: []UnitType{Hive},
+		SelfBuild: true, NeedsCreep: true, Creep: 3,
+	},
+	GestationDen: {
+		Type: GestationDen, Faction: Brood, Name: "Gestation Den", Role: "Unlocks Broodmothers, Behemoths",
+		Crystals: 150, Flux: 100, BuildTime: 45,
+		HP: 1000, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8, Regen: broodBuildingRegen,
+		Building: true, Size: 3, Requires: []UnitType{SpawningPit},
+		SelfBuild: true, NeedsCreep: true, Creep: 3,
+	},
 }
+
+// Brood tuning.
+const (
+	// SpawnTime is how often (seconds) a Hive hatches a Spawn while it has
+	// fewer than SpawnMax idle ones.
+	SpawnTime          = 10
+	broodUnitRegen     = 0.6
+	broodBuildingRegen = 2
+)
+
+// broodForms is what a Spawn can morph into, in command-card order.
+var broodForms = []UnitType{Drone, Biter, Leaper, Spitter, Broodmother, Behemoth}
 
 // Unit returns the definition for t. It panics on an out-of-range type.
 func Unit(t UnitType) UnitDef { return unitDefs[t] }
@@ -296,6 +426,9 @@ func Buildable(f ID) []UnitType {
 // TrainedAt returns the building type that trains t, or false if none does.
 func TrainedAt(t UnitType) (UnitType, bool) {
 	for _, d := range unitDefs {
+		if !d.Building {
+			continue
+		}
 		for _, x := range d.Trains {
 			if x == t {
 				return d.Type, true
