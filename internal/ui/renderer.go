@@ -137,7 +137,7 @@ func (r *Renderer) DrawTitle(screen *ebiten.Image, ti *Title, focused bool) {
 		blink = 0.75 + 0.25*math.Sin(float64(r.frame)*0.15)
 	}
 	drawCentered(screen, prompt, r.hudFace, cx, float64(r.h)*0.88, withAlpha(colText, blink))
-	hud := fmt.Sprintf("M2a BUILD   shifts %d", ti.Shifts)
+	hud := fmt.Sprintf("M2b BUILD   shifts %d", ti.Shifts)
 	drawLeft(screen, hud, r.hudFace, 16, float64(r.h)-28, colDim)
 	drawRight(screen, "GITHUB GAME OFF 2026  ·  THEME: SHIFT", r.hudFace, float64(r.w)-16, float64(r.h)-28, colDim)
 }

@@ -15,8 +15,10 @@ func main() {
 	flag.IntVar(&opts.QuitAfterUpdates, "updates", 0, "quit after N updates (smoke testing; 0 = run forever)")
 	flag.StringVar(&opts.ScreenshotPath, "screenshot", "", "save a PNG of the final frame (requires -updates)")
 	flag.IntVar(&opts.AutoShiftUpdates, "autoshift", 0, "title screen: press Shift automatically every N updates")
-	flag.BoolVar(&opts.StartMatch, "match", false, "skip the title screen and start the sandbox match")
+	flag.BoolVar(&opts.StartMatch, "match", false, "skip the title screen and start a skirmish")
 	flag.BoolVar(&opts.Demo, "demo", false, "start the match with the army attack-moving into the enemy (implies -match)")
+	flag.IntVar(&opts.SkipSeconds, "skip", 0, "fast-forward a new match by N seconds of game time (smoke testing)")
+	flag.BoolVar(&opts.Reveal, "reveal", false, "start the match with fog of war off (smoke testing)")
 	flag.Parse()
 
 	ebiten.SetWindowSize(engine.ScreenWidth, engine.ScreenHeight)

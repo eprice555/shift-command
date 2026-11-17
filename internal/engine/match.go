@@ -9,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
+	"github.com/eprice555/shift-command/internal/ai"
 	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
 	"github.com/eprice555/shift-command/internal/sim"
@@ -20,6 +21,7 @@ const (
 	keyScrollSpeed     = 900.0 / UpdateTPS
 	edgeScrollMargin   = 6
 	clickSlop          = 5 // px a press may move and still count as a click
+	alertCooldown      = 15 * UpdateTPS
 )
 
 type ping struct {
@@ -31,6 +33,7 @@ type ping struct {
 // the sim at its fixed rate.
 type Match struct {
 	sandbox bool
+	ai      *ai.AI // the opponent; nil in the sandbox
 	world   *sim.World
 	player  sim.PlayerID
 	clock   *FixedStep
@@ -69,6 +72,11 @@ type Match struct {
 	spawnCycle int
 	cursorMode ebiten.CursorShapeType
 
+	// Under-attack alert: where the enemy last fired on us off-screen.
+	alert    geom.Vec
+	alertAt  int
+	hasAlert bool
+
 	// Presentation output since the last draw.
 	events []sim.Event
 	pings  []ping
@@ -92,8 +100,25 @@ func NewMatch(sandbox bool) *Match {
 			MapW: float64(w.Map.W), MapH: float64(w.Map.H),
 		},
 	}
+	if !sandbox {
+		m.ai = ai.New(w, 1-m.player)
+	}
 	m.cam.CenterOn(w.Map.Starts[m.player].Add(geom.V(2, -3)))
 	return m
+}
+
+// fastForward runs n sim ticks with the AI playing and the human idle.
+func (m *Match) fastForward(n int) {
+	for range n {
+		if m.world.Over {
+			return
+		}
+		var cmds []sim.Command
+		if m.ai != nil {
+			cmds = m.ai.Think(m.world)
+		}
+		m.world.Step(cmds)
+	}
 }
 
 // Done reports whether the player has left a finished match.
@@ -190,6 +215,9 @@ func (m *Match) Update() {
 	}
 
 	for range m.clock.Advance() {
+		if m.ai != nil {
+			m.pending = append(m.pending, m.ai.Think(m.world)...)
+		}
 		m.world.Step(m.pending)
 		m.pending = m.pending[:0]
 		if len(m.events) < 1024 {
@@ -203,8 +231,21 @@ func (m *Match) Update() {
 				}
 				m.say(msg)
 			}
+			if ev.Kind == sim.EvShot && ev.Owner != m.player && m.ai != nil {
+				m.underAttack(ev.To)
+			}
 		}
 	}
+}
+
+// underAttack raises an alert when the enemy hits something of ours that
+// is off-screen, at most once per alertCooldown.
+func (m *Match) underAttack(p geom.Vec) {
+	if m.cam.Visible().Contains(p) || m.hasAlert && m.updates-m.alertAt < alertCooldown {
+		return
+	}
+	m.alert, m.alertAt, m.hasAlert = p, m.updates, true
+	m.say("Under attack!  (SPACE to jump there)")
 }
 
 func (m *Match) updateCamera() {
@@ -580,6 +621,10 @@ func (m *Match) updateKeys() {
 	if pressed(ebiten.KeyShiftLeft) || pressed(ebiten.KeyShiftRight) {
 		m.say("SHIFT: The Forge's gear-shift modes arrive in the next update")
 	}
+	if pressed(ebiten.KeySpace) && m.hasAlert {
+		m.cam.CenterOn(m.alert)
+		m.follow = false
+	}
 	if pressed(ebiten.KeyEscape) {
 		switch {
 		case m.placing:
@@ -671,6 +716,7 @@ func (m *Match) View() *ui.MatchView {
 		Dragging: m.dragging, DragFrom: m.dragFrom, Cursor: m.cursor,
 		Targeting: m.targeting, RevealAll: m.revealAll, Focused: ebiten.IsFocused(),
 		ShowHelp: m.showHelp, Message: m.msg, MessageAge: m.updates - m.msgAt,
+		HasAlert: m.hasAlert, Alert: m.alert, AlertAge: m.updates - m.alertAt,
 		Card: m.card, Placing: m.placing, PlaceType: m.placeType, PlaceX: m.placeX, PlaceY: m.placeY,
 	}
 	if m.placing {
