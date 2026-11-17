@@ -59,19 +59,33 @@ func (w Weapon) DamageTo(d UnitDef) float64 {
 	return max(MinDamage, w.Damage*DamageMultiplier(w.Type, d.ArmorType)-d.Armor)
 }
 
-// UnitType identifies a unit definition.
+// UnitType identifies a unit or building definition. Buildings share the
+// type space (and the sim's entity list) so they can be selected, attacked,
+// and drawn through the same paths as units.
 type UnitType uint8
 
 const (
 	Trooper UnitType = iota
 	Outrider
 	Strider
+	Rigger
+	Mender
+	Bastion
+	CommandHub
+	Generator
+	Extractor
+	DrillYard
+	Foundry
 
 	UnitTypeCount
 )
 
-// UnitDef is the data-driven stat block for a unit. Distances are in tiles,
-// speeds in tiles per second. Balance changes go here, not in sim logic.
+// MaxSupply is the hard supply cap per player.
+const MaxSupply = 100
+
+// UnitDef is the data-driven stat block for a unit or building. Distances
+// are in tiles, speeds in tiles per second, times in seconds. Balance
+// changes go here, not in sim logic.
 type UnitDef struct {
 	Type    UnitType
 	Faction ID
@@ -79,42 +93,134 @@ type UnitDef struct {
 	Role    string
 
 	Crystals, Flux int
-	Supply         float64
+	Supply         float64 // supply used
+	BuildTime      float64 // train time for units, construction time for buildings
 
 	HP        float64
 	Armor     float64
 	ArmorType ArmorType
 	Radius    float64
-	Speed     float64
+	Speed     float64 // 0 for buildings
 	Sight     float64
-	Weapon    Weapon
+	Weapon    Weapon // zero Damage means unarmed
+
+	Bio  bool // can be healed (Mender)
+	Mech bool // can be repaired (Rigger)
+
+	Worker    bool    // gathers, constructs, repairs
+	HealRate  float64 // HP per second to a nearby damaged Bio ally
+	HealRange float64
+
+	// Buildings.
+	Building       bool
+	Size           int        // square footprint in tiles
+	SupplyProvided float64    // supply cap granted once complete
+	DropOff        bool       // workers return cargo here
+	OnVent         bool       // must be placed on a flux vent
+	Trains         []UnitType // units this building produces
+	Requires       []UnitType // completed buildings needed to build/train this
 }
 
-// M1 placeholder stats for the first Forge units. Costs and supply follow the
-// GDD; combat numbers are first-pass values for the M1 playtest.
+// Armed reports whether the def has a weapon.
+func (d UnitDef) Armed() bool { return d.Weapon.Damage > 0 }
+
+// Placeholder stats: costs, supply, roles, and armor classes follow the GDD;
+// HP, damage, and times are first-pass values for playtesting.
 var unitDefs = [UnitTypeCount]UnitDef{
 	Trooper: {
 		Type: Trooper, Faction: Forge, Name: "Trooper", Role: "Basic ranged infantry",
-		Crystals: 50, Supply: 1,
-		HP: 45, ArmorType: Light, Radius: 0.36, Speed: 2.8, Sight: 8,
+		Crystals: 50, Supply: 1, BuildTime: 14,
+		HP: 45, ArmorType: Light, Radius: 0.36, Speed: 2.8, Sight: 8, Bio: true,
 		Weapon: Weapon{Damage: 6, Type: Normal, Range: 5, Cooldown: 0.85},
 	},
 	Outrider: {
 		Type: Outrider, Faction: Forge, Name: "Outrider", Role: "Fast raider, bonus vs Light",
-		Crystals: 75, Supply: 2,
-		HP: 65, ArmorType: Light, Radius: 0.45, Speed: 4.2, Sight: 8,
+		Crystals: 75, Supply: 2, BuildTime: 18,
+		HP: 65, ArmorType: Light, Radius: 0.45, Speed: 4.2, Sight: 8, Mech: true,
 		Weapon: Weapon{Damage: 9, Type: Concussive, Range: 2, Cooldown: 1.0},
 	},
 	Strider: {
 		Type: Strider, Faction: Forge, Name: "Strider", Role: "Anti-armor walker",
-		Crystals: 100, Flux: 25, Supply: 2,
-		HP: 140, Armor: 1, ArmorType: Armored, Radius: 0.6, Speed: 2.2, Sight: 9,
+		Crystals: 100, Flux: 25, Supply: 2, BuildTime: 24,
+		HP: 140, Armor: 1, ArmorType: Armored, Radius: 0.6, Speed: 2.2, Sight: 9, Mech: true,
 		Weapon: Weapon{Damage: 18, Type: Explosive, Range: 6, Cooldown: 1.5},
+	},
+	Rigger: {
+		Type: Rigger, Faction: Forge, Name: "Rigger", Role: "Worker: gathers, builds, repairs",
+		Crystals: 50, Supply: 1, BuildTime: 12,
+		HP: 45, ArmorType: Light, Radius: 0.34, Speed: 2.8, Sight: 7, Bio: true, Worker: true,
+		Weapon: Weapon{Damage: 5, Type: Normal, Range: 0.2, Cooldown: 1.2},
+	},
+	Mender: {
+		Type: Mender, Faction: Forge, Name: "Mender", Role: "Support: heals infantry",
+		Crystals: 50, Flux: 25, Supply: 1, BuildTime: 18,
+		HP: 60, ArmorType: Light, Radius: 0.36, Speed: 2.8, Sight: 9, Bio: true,
+		HealRate: 9, HealRange: 3,
+	},
+	Bastion: {
+		Type: Bastion, Faction: Forge, Name: "Bastion", Role: "Siege tank",
+		Crystals: 150, Flux: 100, Supply: 3, BuildTime: 32,
+		HP: 170, Armor: 1, ArmorType: Armored, Radius: 0.75, Speed: 2.2, Sight: 10, Mech: true,
+		Weapon: Weapon{Damage: 15, Type: Explosive, Range: 7, Cooldown: 1.7},
+	},
+	CommandHub: {
+		Type: CommandHub, Faction: Forge, Name: "Command Hub", Role: "HQ: trains Riggers, cargo drop-off",
+		Crystals: 400, BuildTime: 60,
+		HP: 1500, Armor: 1, ArmorType: Armored, Radius: 2, Sight: 10, Mech: true,
+		Building: true, Size: 4, SupplyProvided: 10, DropOff: true, Trains: []UnitType{Rigger},
+	},
+	Generator: {
+		Type: Generator, Faction: Forge, Name: "Generator", Role: "+8 supply",
+		Crystals: 100, BuildTime: 20,
+		HP: 400, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 7, Mech: true,
+		Building: true, Size: 2, SupplyProvided: 8,
+	},
+	Extractor: {
+		Type: Extractor, Faction: Forge, Name: "Extractor", Role: "Harvests flux from a vent",
+		Crystals: 75, BuildTime: 20,
+		HP: 450, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 7, Mech: true,
+		Building: true, Size: 2, OnVent: true,
+	},
+	DrillYard: {
+		Type: DrillYard, Faction: Forge, Name: "Drill Yard", Role: "Trains Troopers, Outriders, Menders",
+		Crystals: 150, BuildTime: 40,
+		HP: 1000, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8, Mech: true,
+		Building: true, Size: 3, Trains: []UnitType{Trooper, Outrider, Mender}, Requires: []UnitType{CommandHub},
+	},
+	Foundry: {
+		Type: Foundry, Faction: Forge, Name: "Foundry", Role: "Trains Striders, Bastions",
+		Crystals: 150, Flux: 100, BuildTime: 45,
+		HP: 1150, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8, Mech: true,
+		Building: true, Size: 3, Trains: []UnitType{Strider, Bastion}, Requires: []UnitType{DrillYard},
 	},
 }
 
 // Unit returns the definition for t. It panics on an out-of-range type.
 func Unit(t UnitType) UnitDef { return unitDefs[t] }
 
-// Units returns every unit definition in type order.
+// Units returns every unit and building definition in type order.
 func Units() []UnitDef { return unitDefs[:] }
+
+// Buildable returns the building types a worker of faction f can construct,
+// in command-card order.
+func Buildable(f ID) []UnitType {
+	var out []UnitType
+	for _, d := range unitDefs {
+		if d.Building && d.Faction == f {
+			out = append(out, d.Type)
+		}
+	}
+	return out
+}
+
+// TrainedAt returns the building type that trains t, or false if none does.
+func TrainedAt(t UnitType) (UnitType, bool) {
+	for _, d := range unitDefs {
+		for _, x := range d.Trains {
+			if x == t {
+				return d.Type, true
+			}
+		}
+	}
+	return 0, false
+}

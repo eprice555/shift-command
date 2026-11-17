@@ -32,7 +32,7 @@ func run(w *World, ticks int, cmds ...Command) {
 func assertPassable(t *testing.T, w *World) {
 	t.Helper()
 	for _, u := range w.Units {
-		if w.Map.Blocked(world.TileOf(u.Pos)) {
+		if !u.Def.Building && w.Map.Blocked(world.TileOf(u.Pos)) {
 			t.Fatalf("tick %d: unit %d inside wall at %v", w.Tick, u.ID, u.Pos)
 		}
 	}
@@ -271,7 +271,7 @@ func TestSandboxBattleDeterministic(t *testing.T) {
 
 func TestSpawnCommand(t *testing.T) {
 	w := openWorld(20, 20)
-	run(w, 1, Command{Kind: CmdSpawn, Player: 1, Point: geom.V(10, 10), SpawnType: faction.Strider, SpawnCount: 4})
+	run(w, 1, Command{Kind: CmdSpawn, Player: 1, Point: geom.V(10, 10), Type: faction.Strider, Count: 4})
 	if w.Count(1) != 4 {
 		t.Fatalf("spawned %d, want 4", w.Count(1))
 	}

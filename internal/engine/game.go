@@ -63,7 +63,7 @@ func NewGame(opts Options) (*Game, error) {
 }
 
 func (g *Game) startMatch() {
-	g.match = NewMatch()
+	g.match = NewMatch(g.opts.Demo)
 	if g.opts.Demo {
 		m := g.match
 		m.setSelection(m.onScreen(func(*sim.Unit) bool { return true }))
@@ -83,6 +83,9 @@ func (g *Game) Update() error {
 
 	if g.match != nil {
 		g.match.Update()
+		if g.match.Done() {
+			g.match = nil
+		}
 		return nil
 	}
 	shift := inpututil.IsKeyJustPressed(ebiten.KeyShiftLeft) || inpututil.IsKeyJustPressed(ebiten.KeyShiftRight)

@@ -32,6 +32,12 @@ func (c *Camera) ToScreen(p geom.Vec) (float64, float64) {
 }
 
 // ToWorld converts screen pixels to a world point (tiles).
+// ToScreenV is ToScreen returning a vector.
+func (c *Camera) ToScreenV(p geom.Vec) geom.Vec {
+	x, y := c.ToScreen(p)
+	return geom.V(x, y)
+}
+
 func (c *Camera) ToWorld(sx, sy float64) geom.Vec {
 	return geom.V((sx/c.Zoom+c.X)/TilePx, (sy/c.Zoom+c.Y)/TilePx)
 }

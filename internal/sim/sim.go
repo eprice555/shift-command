@@ -27,8 +27,12 @@ type UnitID uint32
 type EventKind uint8
 
 const (
-	EvShot  EventKind = iota // a unit fired: From → To
-	EvDeath                  // a unit died at From
+	EvShot         EventKind = iota // a unit fired: From → To
+	EvDeath                         // a unit died at From
+	EvNotice                        // a command was refused (Notice; Type for "Requires")
+	EvUnitReady                     // a unit finished training at From
+	EvBuildingDone                  // a building finished construction at From
+	EvHeal                          // a healer pulsed: From → To
 )
 
 // Event is something that happened during a tick. The sim never reads its
@@ -40,6 +44,16 @@ type Event struct {
 	From   geom.Vec
 	To     geom.Vec
 	Attack faction.AttackType
+	Notice Notice
+}
+
+// Ghost is a player's memory of an enemy building last seen in the fog.
+type Ghost struct {
+	Type     faction.UnitType
+	Owner    PlayerID
+	TileX    int
+	TileY    int
+	Complete bool
 }
 
 // World is the full simulation state.
@@ -51,10 +65,22 @@ type World struct {
 	// Events lists what happened during the most recent Step.
 	Events []Event
 
-	byID   map[UnitID]*Unit
-	nextID UnitID
-	hits   []hit
-	vel    []geom.Vec
+	Players   [NumPlayers]Player
+	Resources []*Resource
+	// Seen holds each player's last sighting of enemy buildings.
+	Seen [NumPlayers]map[UnitID]Ghost
+
+	// Over is set once a side has lost all its buildings.
+	Over   bool
+	Winner PlayerID
+	Draw   bool
+
+	byID    map[UnitID]*Unit
+	resByID map[ResourceID]*Resource
+	nextID  UnitID
+	nextRes ResourceID
+	hits    []hit
+	vel     []geom.Vec
 }
 
 type hit struct {
@@ -62,25 +88,33 @@ type hit struct {
 	damage float64
 }
 
-// NewWorld returns an empty world on map m.
+// NewWorld returns a world on map m with its resource nodes and no units.
 func NewWorld(m *world.Map) *World {
-	w := &World{Map: m, byID: map[UnitID]*Unit{}, nextID: 1}
+	w := &World{Map: m, byID: map[UnitID]*Unit{}, resByID: map[ResourceID]*Resource{}, nextID: 1, nextRes: 1}
 	for i := range w.Fog {
 		w.Fog[i] = world.NewFog(m.W, m.H)
+		w.Seen[i] = map[UnitID]Ghost{}
 	}
+	w.addResources()
 	return w
 }
 
 // Unit returns the live unit with id, or nil.
 func (w *World) Unit(id UnitID) *Unit { return w.byID[id] }
 
-// Spawn adds a unit at pos (nudged out of walls) and returns it.
+// Spawn adds a unit at pos (nudged out of walls) and returns it. Buildings
+// are placed complete with their footprint centered near pos.
 func (w *World) Spawn(owner PlayerID, t faction.UnitType, pos geom.Vec) *Unit {
 	def := faction.Unit(t)
+	if def.Building {
+		h := float64(def.Size) / 2
+		x, y := world.TileOf(pos.Sub(geom.V(h, h)).Add(geom.V(0.5, 0.5)))
+		return w.PlaceBuilding(owner, t, x, y, true)
+	}
 	pos = w.Map.ResolveCircle(w.Map.SnapPassable(pos), def.Radius)
 	u := &Unit{
 		ID: w.nextID, Owner: owner, Type: t, Def: def,
-		Pos: pos, PrevPos: pos, HP: def.HP,
+		Pos: pos, PrevPos: pos, HP: def.HP, Complete: true,
 	}
 	if owner == 1 {
 		u.Facing = math.Pi
@@ -132,14 +166,20 @@ func (w *World) Step(cmds []Command) {
 	for _, u := range w.Units {
 		u.PrevPos, u.PrevFacing = u.Pos, u.Facing
 	}
+	w.recount()
 	for i := range cmds {
 		w.apply(&cmds[i])
 	}
+	w.countAssignments()
 
 	w.vel = w.vel[:0]
 	w.hits = w.hits[:0]
 	for _, u := range w.Units {
 		w.vel = append(w.vel, w.think(u))
+	}
+	// Units trained or buildings placed this tick start moving next tick.
+	for len(w.vel) < len(w.Units) {
+		w.vel = append(w.vel, geom.Vec{})
 	}
 	for i, u := range w.Units {
 		v := w.vel[i]
@@ -151,6 +191,9 @@ func (w *World) Step(cmds []Command) {
 	}
 	w.separate()
 	for i, u := range w.Units {
+		if u.Def.Building {
+			continue
+		}
 		u.Pos = w.Map.ResolveCircle(u.Pos, u.Def.Radius)
 		if want := w.vel[i].Len(); want > 0 && u.Pos.Dist(u.PrevPos) < want*0.2 {
 			u.stuck++
@@ -161,13 +204,16 @@ func (w *World) Step(cmds []Command) {
 
 	// Damage lands after every unit has acted, so iteration order never
 	// decides who shoots first.
+	// Negative damage is healing or repair.
 	for _, h := range w.hits {
 		if t := w.byID[h.target]; t != nil {
-			t.HP -= h.damage
+			t.HP = min(t.HP-h.damage, max(t.HP, t.Def.HP))
 		}
 	}
 	w.removeDead()
 	w.updateFog()
+	w.recount()
+	w.checkOver()
 	w.Tick++
 }
 
@@ -179,6 +225,9 @@ func (w *World) removeDead() {
 			continue
 		}
 		delete(w.byID, u.ID)
+		if u.Def.Building {
+			w.Map.Occupy(u.TileX, u.TileY, u.Def.Size, -1)
+		}
 		w.Events = append(w.Events, Event{Kind: EvDeath, Owner: u.Owner, Type: u.Type, From: u.Pos})
 	}
 	clear(w.Units[len(live):])
@@ -192,6 +241,21 @@ func (w *World) updateFog() {
 	for _, u := range w.Units {
 		w.Fog[u.Owner].Reveal(u.Pos, u.Def.Sight)
 	}
+	for p := range w.Seen {
+		seen, fog := w.Seen[p], w.Fog[p]
+		for id, g := range seen {
+			c := faction.Unit(g.Type)
+			n := float64(c.Size) / 2
+			if fog.VisibleAt(geom.V(float64(g.TileX)+n, float64(g.TileY)+n)) && w.byID[id] == nil {
+				delete(seen, id)
+			}
+		}
+		for _, u := range w.Units {
+			if u.Def.Building && u.Owner != PlayerID(p) && fog.VisibleAt(u.Pos) {
+				seen[u.ID] = Ghost{Type: u.Type, Owner: u.Owner, TileX: u.TileX, TileY: u.TileY, Complete: u.Complete}
+			}
+		}
+	}
 }
 
 // separate pushes overlapping units apart. Busy units (holding, firing)
@@ -201,8 +265,14 @@ func (w *World) separate() {
 	us := w.Units
 	for i := range us {
 		a := us[i]
+		if a.Def.Building {
+			continue
+		}
 		for j := i + 1; j < len(us); j++ {
 			b := us[j]
+			if b.Def.Building || a.Owner == b.Owner && a.gathering() && b.gathering() {
+				continue
+			}
 			minD := a.Def.Radius + b.Def.Radius
 			dx, dy := b.Pos.X-a.Pos.X, b.Pos.Y-a.Pos.Y
 			if dx > minD || dx < -minD || dy > minD || dy < -minD {
