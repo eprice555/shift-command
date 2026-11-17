@@ -9,8 +9,10 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
+	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
 	"github.com/eprice555/shift-command/internal/sim"
+	"github.com/eprice555/shift-command/internal/world"
 )
 
 // HUD layout (screen px).
@@ -47,7 +49,13 @@ func PanelRect(w, h float64) geom.Rect {
 // OverHUD reports whether a screen point is on a HUD panel.
 func OverHUD(w, h, sx, sy float64) bool {
 	p := geom.V(sx, sy)
-	return MinimapRect(w, h).Contains(p) || PanelRect(w, h).Contains(p)
+	return MinimapRect(w, h).Contains(p) || PanelRect(w, h).Contains(p) ||
+		CardRect(w, h).Contains(p) || ResourceBarRect(w).Contains(p)
+}
+
+// ResourceBarRect returns the top-right resource readout's screen rect.
+func ResourceBarRect(w float64) geom.Rect {
+	return geom.Rect{Min: geom.V(w-hudMargin-400, 8), Max: geom.V(w-hudMargin, 34)}
 }
 
 func drawBox(dst *ebiten.Image, r geom.Rect, edge color.Color) {
@@ -60,22 +68,32 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v *MatchView) {
 	world := v.World
 
 	// Top-left status.
-	own, seen := 0, 0
+	workers, army, buildings := 0, 0, 0
 	for _, u := range world.Units {
 		switch {
-		case u.Owner == v.Player:
-			own++
-		case unitVisible(v, u):
-			seen++
+		case u.Owner != v.Player:
+		case u.Def.Building:
+			buildings++
+		case u.Def.Worker:
+			workers++
+		default:
+			army++
 		}
 	}
 	secs := int(world.Tick / sim.TicksPerSecond)
-	drawLeft(screen, fmt.Sprintf("%s  ·  SANDBOX", strings.ToUpper(world.Map.Name)), r.hudFace, 16, 20, colText)
-	drawLeft(screen, fmt.Sprintf("UNITS %d   ENEMIES IN SIGHT %d   %02d:%02d", own, seen, secs/60, secs%60), r.smallFace, 16, 42, colDim)
+	mode := "SKIRMISH"
+	if v.Sandbox {
+		mode = "SANDBOX"
+	}
+	drawLeft(screen, fmt.Sprintf("%s  ·  %s", strings.ToUpper(world.Map.Name), mode), r.hudFace, 16, 20, colText)
+	drawLeft(screen, fmt.Sprintf("WORKERS %d   ARMY %d   BUILDINGS %d   %02d:%02d", workers, army, buildings, secs/60, secs%60), r.smallFace, 16, 42, colDim)
 	if v.RevealAll {
 		drawLeft(screen, "FOG OFF (F4)", r.smallFace, 16, 60, colHPMid)
 	}
-	drawRight(screen, "F1  CONTROLS", r.smallFace, w-16, 20, colDim)
+	if !v.Sandbox {
+		r.drawResourceBar(screen, v, ResourceBarRect(w))
+	}
+	drawRight(screen, "F1  CONTROLS", r.smallFace, w-16, 48, colDim)
 
 	if v.Message != "" && v.MessageAge < 150 {
 		a := min(1, float64(150-v.MessageAge)/30)
@@ -89,8 +107,12 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v *MatchView) {
 	r.drawPanel(screen, v, PanelRect(w, h))
 	r.drawGroups(screen, v, PanelRect(w, h))
 	r.drawMinimap(screen, v, MinimapRect(w, h))
+	r.drawCard(screen, v, CardRect(w, h))
 	if v.ShowHelp {
 		r.drawHelp(screen)
+	}
+	if world.Over {
+		r.drawGameOver(screen, v)
 	}
 	if v.Targeting {
 		x, y := float32(v.Cursor.X), float32(v.Cursor.Y)
@@ -115,10 +137,15 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 	switch len(units) {
 	case 0:
 		drawLeft(screen, "NO SELECTION", r.hudFace, x, y, colDim)
-		drawLeft(screen, "Drag a box or click to select your units.", r.smallFace, x, y+26, colDim)
-		drawLeft(screen, "Right-click ground to move, an enemy to attack.", r.smallFace, x, y+44, colDim)
+		drawLeft(screen, "Riggers mine crystals on their own. Select one and press", r.smallFace, x, y+26, colDim)
+		drawLeft(screen, "Q-T to build. Select the Hub and press Q to train Riggers.", r.smallFace, x, y+44, colDim)
+		drawLeft(screen, "Destroy every enemy building to win.", r.smallFace, x, y+62, colDim)
 	case 1:
 		u := units[0]
+		if u.Def.Building {
+			r.drawBuildingPanel(screen, v, u, box)
+			return
+		}
 		col := PlayerColor(u.Owner, v.Player)
 		d := u.Def
 		drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, col)
@@ -126,8 +153,24 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 		drawLeft(screen, d.Role, r.smallFace, x, y+22, colDim)
 		hp := fmt.Sprintf("HP %.0f/%.0f   ARMOR %s %g   SPEED %g", math.Max(u.HP, 0), d.HP, d.ArmorType, d.Armor, d.Speed)
 		drawLeft(screen, hp, r.smallFace, x, y+44, colText)
-		wp := d.Weapon
-		drawLeft(screen, fmt.Sprintf("WEAPON %g %s   RANGE %g   COOLDOWN %gs", wp.Damage, wp.Type, wp.Range, wp.Cooldown), r.smallFace, x, y+62, colText)
+		var line string
+		switch wp := d.Weapon; {
+		case d.Armed():
+			line = fmt.Sprintf("WEAPON %g %s   RANGE %g   COOLDOWN %gs", wp.Damage, wp.Type, wp.Range, wp.Cooldown)
+		case d.HealRate > 0:
+			line = fmt.Sprintf("HEALS %g HP/s   RANGE %g   (infantry)", d.HealRate, d.HealRange)
+		}
+		if d.Worker {
+			line = "NO CARGO"
+			if u.Cargo > 0 {
+				kind := "CRYSTALS"
+				if u.CargoKind == world.Flux {
+					kind = "FLUX"
+				}
+				line = fmt.Sprintf("CARGO %d %s", u.Cargo, kind)
+			}
+		}
+		drawLeft(screen, line, r.smallFace, x, y+62, colText)
 		bw := float32(box.W() - 28)
 		vector.FillRect(screen, float32(x), float32(y+78), bw, 4, color.RGBA{0x20, 0x26, 0x38, 0xFF}, false)
 		frac := math.Max(u.HP, 0) / d.HP
@@ -137,22 +180,236 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 	}
 }
 
+func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.Unit, box geom.Rect) {
+	x, y := box.Min.X+14, box.Min.Y+18
+	d := u.Def
+	drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, PlayerColor(u.Owner, v.Player))
+	drawRight(screen, unitState(u), r.smallFace, box.Max.X-14, y, colDim)
+	stats := fmt.Sprintf("HP %.0f/%.0f   ARMOR %g", math.Max(u.HP, 0), d.HP, d.Armor)
+	if d.SupplyProvided > 0 {
+		stats += fmt.Sprintf("   SUPPLY +%g", d.SupplyProvided)
+	}
+	drawLeft(screen, stats, r.smallFace, x, y+22, hpColor(u.HP/d.HP))
+	if u.Owner != v.Player {
+		drawLeft(screen, d.Role, r.smallFace, x, y+44, colDim)
+		return
+	}
+	bar := func(label string, frac float64, bx, by float64) {
+		bw := box.Max.X - 14 - bx
+		drawLeft(screen, label, r.smallFace, bx, by, colText)
+		vector.FillRect(screen, float32(bx), float32(by+12), float32(bw), 4, color.RGBA{0x20, 0x26, 0x38, 0xFF}, false)
+		vector.FillRect(screen, float32(bx), float32(by+12), float32(bw*frac), 4, colBuild, false)
+	}
+	if !u.Complete {
+		bar(fmt.Sprintf("CONSTRUCTING  %d%%", int(u.BuildFrac()*100)), u.BuildFrac(), x, y+46)
+		return
+	}
+	if len(d.Trains) == 0 {
+		drawLeft(screen, d.Role, r.smallFace, x, y+44, colDim)
+		return
+	}
+	var pts []geom.Vec
+	var path vector.Path
+	for i := range sim.MaxQueue {
+		q := QueueSlotRect(box, i)
+		edge := colPanelEdge
+		if i < len(u.Queue) && q.Contains(v.Cursor) {
+			edge = colBad
+		}
+		vector.StrokeRect(screen, float32(q.Min.X)+0.5, float32(q.Min.Y)+0.5, float32(q.W())-1, float32(q.H())-1, 1, edge, false)
+		if i >= len(u.Queue) {
+			continue
+		}
+		c := q.Min.Lerp(q.Max, 0.5)
+		path.Reset()
+		pts = unitShape(pts[:0], u.Queue[i])
+		for j, p := range pts {
+			px, py := float32(c.X+p.Y*12), float32(c.Y-p.X*12)
+			if j == 0 {
+				path.MoveTo(px, py)
+			} else {
+				path.LineTo(px, py)
+			}
+		}
+		path.Close()
+		sop := &vector.StrokeOptions{Width: 1.5, LineJoin: vector.LineJoinRound}
+		dop := &vector.DrawPathOptions{AntiAlias: true}
+		dop.ColorScale.ScaleWithColor(PlayerColor(u.Owner, v.Player))
+		vector.StrokePath(screen, &path, sop, dop)
+	}
+	q0 := QueueSlotRect(box, sim.MaxQueue)
+	if len(u.Queue) > 0 {
+		bar(fmt.Sprintf("TRAINING %s  %d%%", strings.ToUpper(faction.Unit(u.Queue[0]).Name), int(u.TrainFrac()*100)), u.TrainFrac(), q0.Min.X+10, q0.Min.Y+8)
+	} else {
+		drawLeft(screen, "Press "+cardKeys[0][0]+" to train · right-click sets rally", r.smallFace, q0.Min.X+10, q0.Min.Y+20, colDim)
+	}
+}
+
 func unitState(u *sim.Unit) string {
+	if u.Def.Building {
+		switch {
+		case !u.Complete:
+			return "UNDER CONSTRUCTION"
+		case len(u.Queue) > 0:
+			return fmt.Sprintf("TRAINING · %d QUEUED", len(u.Queue))
+		}
+		return "READY"
+	}
+	var kind sim.OrderKind = 255
+	if len(u.Orders) > 0 {
+		kind = u.Orders[0].Kind
+	}
 	switch {
 	case u.Hold && u.Target() != 0:
 		return "HOLDING · FIRING"
 	case u.Hold:
 		return "HOLDING"
-	case len(u.Orders) > 0 && u.Orders[0].Kind == sim.OrderAttack:
+	case u.HealTarget() != 0:
+		return "HEALING"
+	case kind == sim.OrderGather && u.Cargo > 0, kind == sim.OrderReturn:
+		return "RETURNING CARGO"
+	case kind == sim.OrderGather && u.Mining():
+		return "MINING"
+	case kind == sim.OrderGather:
+		return "GATHERING"
+	case kind == sim.OrderBuild:
+		return "GOING TO BUILD " + strings.ToUpper(faction.Unit(u.Orders[0].Build).Name)
+	case kind == sim.OrderConstruct:
+		return "CONSTRUCTING"
+	case kind == sim.OrderRepair:
+		return "REPAIRING"
+	case kind == sim.OrderAttack:
 		return "ATTACKING"
 	case u.Target() != 0:
 		return "ENGAGING"
-	case len(u.Orders) > 0 && u.Orders[0].Kind == sim.OrderAttackMove:
+	case kind == sim.OrderAttackMove:
 		return "ATTACK-MOVING"
 	case len(u.Orders) > 0:
 		return "MOVING"
 	}
 	return "IDLE"
+}
+
+func costText(d faction.UnitDef) string {
+	if d.Flux > 0 {
+		return fmt.Sprintf("%d/%d", d.Crystals, d.Flux)
+	}
+	return fmt.Sprint(d.Crystals)
+}
+
+func (r *Renderer) drawCard(screen *ebiten.Image, v *MatchView, card geom.Rect) {
+	drawBox(screen, card, colPanelEdge)
+	for row := range CardRows {
+		for col := range CardCols {
+			b := ButtonRect(card, row, col)
+			vector.StrokeRect(screen, float32(b.Min.X)+0.5, float32(b.Min.Y)+0.5, float32(b.W())-1, float32(b.H())-1, 1, color.RGBA{0x16, 0x20, 0x36, 0xFF}, false)
+		}
+	}
+	var hover *Button
+	for i := range v.Card {
+		bt := &v.Card[i]
+		b := ButtonRect(card, bt.Row, bt.Col)
+		col := colText
+		edge := colPanelEdge
+		if !bt.Enabled {
+			col, edge = colDim, color.RGBA{0x22, 0x2A, 0x40, 0xFF}
+		}
+		if b.Contains(v.Cursor) {
+			hover = bt
+			edge = colSelect
+			vector.FillRect(screen, float32(b.Min.X), float32(b.Min.Y), float32(b.W()), float32(b.H()), withAlpha(colSelect, 0.08), false)
+		}
+		vector.StrokeRect(screen, float32(b.Min.X)+0.5, float32(b.Min.Y)+0.5, float32(b.W())-1, float32(b.H())-1, 1, edge, false)
+		drawLeft(screen, bt.Key, r.smallFace, b.Min.X+4, b.Min.Y+8, colSelect)
+		drawCentered(screen, bt.Label, r.smallFace, b.Min.X+b.W()/2, b.Min.Y+24, col)
+		if bt.Kind == ActBuild || bt.Kind == ActTrain {
+			c := colCrystal
+			if !bt.Enabled {
+				c = colDim
+			}
+			drawCentered(screen, costText(faction.Unit(bt.Type)), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
+		}
+	}
+	if hover != nil {
+		r.drawTooltip(screen, *hover, card)
+	}
+}
+
+func (r *Renderer) drawTooltip(screen *ebiten.Image, bt Button, card geom.Rect) {
+	var lines []string
+	var cols []color.Color
+	add := func(s string, c color.Color) { lines, cols = append(lines, s), append(cols, c) }
+	switch bt.Kind {
+	case ActBuild, ActTrain:
+		d := faction.Unit(bt.Type)
+		add(fmt.Sprintf("%s  [%s]", strings.ToUpper(d.Name), bt.Key), colText)
+		cost := fmt.Sprintf("%d crystals", d.Crystals)
+		if d.Flux > 0 {
+			cost += fmt.Sprintf(" · %d flux", d.Flux)
+		}
+		if d.Supply > 0 {
+			cost += fmt.Sprintf(" · %g supply", d.Supply)
+		}
+		add(fmt.Sprintf("%s · %gs", cost, d.BuildTime), colCrystal)
+		add(d.Role, colDim)
+		if bt.Reason != "" {
+			add(bt.Reason, colBad)
+		}
+	case ActAttack:
+		add("ATTACK-MOVE  [A]", colText)
+		add("Click a point: move there, fighting on the way", colDim)
+	case ActStop:
+		add("STOP  [S]", colText)
+	case ActHold:
+		add("HOLD POSITION  [H]", colText)
+		add("Fire at enemies in range, never move", colDim)
+	case ActCancel:
+		add("CANCEL  [ESC]", colText)
+		add("Cancel construction or the last queued unit", colDim)
+		add(fmt.Sprintf("Refunds %d%%", int(sim.CancelRefund*100)), colDim)
+	}
+	const lh = 18.0
+	h := 14 + lh*float64(len(lines))
+	box := geom.Rect{Min: geom.V(card.Min.X, card.Min.Y-h-6), Max: geom.V(card.Max.X, card.Min.Y-6)}
+	drawBox(screen, box, colPanelEdge)
+	for i, l := range lines {
+		drawLeft(screen, l, r.smallFace, box.Min.X+10, box.Min.Y+16+lh*float64(i), cols[i])
+	}
+}
+
+func (r *Renderer) drawResourceBar(screen *ebiten.Image, v *MatchView, box geom.Rect) {
+	drawBox(screen, box, colPanelEdge)
+	pl := v.World.Players[v.Player]
+	y := box.Min.Y + box.H()/2
+	x := box.Min.X + 14
+	vector.FillRect(screen, float32(x), float32(y-4), 8, 8, colCrystal, false)
+	drawLeft(screen, fmt.Sprintf("CRYSTALS %d", pl.Crystals), r.smallFace, x+14, y, colText)
+	x += 140
+	vector.FillCircle(screen, float32(x+4), float32(y), 4.5, colFlux, true)
+	drawLeft(screen, fmt.Sprintf("FLUX %d", pl.Flux), r.smallFace, x+14, y, colText)
+	x += 108
+	col := color.Color(colText)
+	if pl.Supply >= pl.SupplyCap && pl.SupplyCap < faction.MaxSupply {
+		col = colBad
+	}
+	drawLeft(screen, fmt.Sprintf("SUPPLY %g/%g", pl.Supply, pl.SupplyCap), r.smallFace, x, y, col)
+}
+
+func (r *Renderer) drawGameOver(screen *ebiten.Image, v *MatchView) {
+	w, h := float64(r.w), float64(r.h)
+	vector.FillRect(screen, 0, 0, float32(w), float32(h), color.NRGBA{0x04, 0x05, 0x0A, 0xB0}, false)
+	world := v.World
+	title, col := "DEFEAT", color.RGBA(colEnemy)
+	switch {
+	case world.Draw:
+		title, col = "DRAW", colText
+	case world.Winner == v.Player:
+		title, col = "VICTORY", PlayerColor(v.Player, v.Player)
+	}
+	drawCentered(screen, title, r.titleFace, w/2, h*0.4, col)
+	secs := int(world.Tick / sim.TicksPerSecond)
+	drawCentered(screen, fmt.Sprintf("MATCH TIME %02d:%02d", secs/60, secs%60), r.hudFace, w/2, h*0.4+80, colText)
+	drawCentered(screen, "ENTER  ·  RETURN TO TITLE", r.hudFace, w/2, h*0.4+112, colDim)
 }
 
 // drawWireframes shows a grid of unit icons with health, like a classic RTS.
@@ -237,6 +494,20 @@ func (r *Renderer) drawMinimap(screen *ebiten.Image, v *MatchView, mm geom.Rect)
 		op.GeoM.Translate(mm.Min.X, mm.Min.Y)
 		screen.DrawImage(c.fog, op)
 	}
+	for _, res := range v.World.Resources {
+		px, py := mm.Min.X+res.Pos.X*sx, mm.Min.Y+res.Pos.Y*sy
+		vector.FillRect(screen, float32(px-1), float32(py-1), 2, 2, scaleRGB(resourceColor(res.Kind), 0.8), false)
+	}
+	if !v.RevealAll {
+		for id, g := range v.World.Seen[v.Player] {
+			if u := v.World.Unit(id); u != nil && v.World.VisibleTo(v.Player, u) {
+				continue
+			}
+			n := float64(faction.Unit(g.Type).Size)
+			px, py := mm.Min.X+float64(g.TileX)*sx, mm.Min.Y+float64(g.TileY)*sy
+			vector.FillRect(screen, float32(px), float32(py), float32(n*sx), float32(n*sy), scaleRGB(colEnemy, 0.5), false)
+		}
+	}
 	for _, u := range v.World.Units {
 		if !unitVisible(v, u) {
 			continue
@@ -244,6 +515,12 @@ func (r *Renderer) drawMinimap(screen *ebiten.Image, v *MatchView, mm geom.Rect)
 		col := PlayerColor(u.Owner, v.Player)
 		if isSelected(v, u.ID) {
 			col = colSelect
+		}
+		if u.Def.Building {
+			n := float64(u.Def.Size)
+			px, py := mm.Min.X+float64(u.TileX)*sx, mm.Min.Y+float64(u.TileY)*sy
+			vector.FillRect(screen, float32(px), float32(py), float32(n*sx), float32(n*sy), col, false)
+			continue
 		}
 		px, py := mm.Min.X+u.Pos.X*sx, mm.Min.Y+u.Pos.Y*sy
 		vector.FillRect(screen, float32(px-1.5), float32(py-1.5), 3, 3, col, false)
@@ -260,29 +537,30 @@ var helpLines = [][2]string{
 	{"LEFT CLICK / DRAG", "select units"},
 	{"DOUBLE-CLICK", "select same type on screen"},
 	{"TAB / F + CLICK", "add to selection · queue orders"},
-	{"RIGHT CLICK", "move · attack enemy"},
+	{"RIGHT CLICK", "move · attack · gather · build/repair"},
+	{"RIGHT CLICK (BUILDING)", "set rally point"},
+	{"Q W E R T", "command card: build · train"},
 	{"A, THEN CLICK", "attack-move"},
 	{"S / H", "stop / hold position"},
+	{"ESC", "cancel placement · production · deselect"},
 	{"CTRL or ALT + 0-9", "set control group"},
 	{"0-9 (TWICE)", "select group (center camera)"},
 	{"ARROWS / MIDDLE-DRAG", "scroll camera"},
 	{"WHEEL", "zoom"},
 	{"MINIMAP", "left: jump · right: move"},
-	{"SHIFT", "faction SHIFT (coming in M2)"},
-	{"F2 / F3", "spawn your / enemy squad"},
-	{"F4", "toggle fog of war"},
-	{"ESC", "cancel targeting · deselect"},
+	{"SHIFT", "faction SHIFT (next update)"},
+	{"F2 / F3  ·  F4", "debug spawn  ·  toggle fog"},
 }
 
 func (r *Renderer) drawHelp(screen *ebiten.Image) {
 	const lh = 19.0
-	bw, bh := 440.0, 44+lh*float64(len(helpLines))
-	box := geom.Rect{Min: geom.V(float64(r.w)-bw-hudMargin, 36), Max: geom.V(float64(r.w)-hudMargin, 36+bh)}
+	bw, bh := 540.0, 44+lh*float64(len(helpLines))
+	box := geom.Rect{Min: geom.V(float64(r.w)-bw-hudMargin, 60), Max: geom.V(float64(r.w)-hudMargin, 60+bh)}
 	drawBox(screen, box, colPanelEdge)
 	drawLeft(screen, "CONTROLS", r.hudFace, box.Min.X+14, box.Min.Y+18, colText)
 	for i, l := range helpLines {
 		y := box.Min.Y + 44 + lh*float64(i)
 		drawLeft(screen, l[0], r.smallFace, box.Min.X+14, y, colSelect)
-		drawLeft(screen, l[1], r.smallFace, box.Min.X+196, y, colDim)
+		drawLeft(screen, l[1], r.smallFace, box.Min.X+210, y, colDim)
 	}
 }

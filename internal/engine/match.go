@@ -30,6 +30,7 @@ type ping struct {
 // Match is the in-game scene: it turns input into sim commands and steps
 // the sim at its fixed rate.
 type Match struct {
+	sandbox bool
 	world   *sim.World
 	player  sim.PlayerID
 	clock   *FixedStep
@@ -53,6 +54,13 @@ type Match struct {
 	lastGroup     int
 	lastGroupAt   int
 
+	card      []ui.Button
+	placing   bool
+	placeType faction.UnitType
+	placeX    int
+	placeY    int
+	done      bool // the player left a finished match
+
 	follow     bool // demo: keep the camera on the selection
 	revealAll  bool
 	showHelp   bool
@@ -66,10 +74,15 @@ type Match struct {
 	pings  []ping
 }
 
-// NewMatch starts the M1 sandbox with the camera on the player's start.
-func NewMatch() *Match {
-	w := sim.NewSandbox()
+// NewMatch starts a skirmish (or the M1 combat sandbox) with the camera on
+// the player's start.
+func NewMatch(sandbox bool) *Match {
+	w := sim.NewSkirmish()
+	if sandbox {
+		w = sim.NewSandbox()
+	}
 	m := &Match{
+		sandbox:   sandbox,
 		world:     w,
 		clock:     NewFixedStep(sim.TicksPerSecond, UpdateTPS),
 		lastGroup: -1,
@@ -79,9 +92,12 @@ func NewMatch() *Match {
 			MapW: float64(w.Map.W), MapH: float64(w.Map.H),
 		},
 	}
-	m.cam.CenterOn(w.Map.Starts[m.player].Add(geom.V(6, -6)))
+	m.cam.CenterOn(w.Map.Starts[m.player].Add(geom.V(2, -3)))
 	return m
 }
+
+// Done reports whether the player has left a finished match.
+func (m *Match) Done() bool { return m.done }
 
 func (m *Match) say(s string) { m.msg, m.msgAt = s, m.updates }
 
@@ -137,10 +153,22 @@ func (m *Match) Update() {
 	cx, cy := ebiten.CursorPosition()
 	m.cursor = geom.V(float64(cx), float64(cy))
 	m.prune()
+	m.card = ui.CommandCard(m.world, m.player, m.sel)
 
 	m.updateCamera()
-	m.updateMouse()
-	m.updateKeys()
+	if m.world.Over {
+		m.placing, m.targeting = false, false
+		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+			m.done = true
+		}
+	} else {
+		m.updateMouse()
+		m.updateKeys()
+	}
+	if m.placing {
+		p := m.cam.ToWorld(m.cursor.X, m.cursor.Y)
+		m.placeX, m.placeY = ui.PlacementTile(m.world, m.placeType, p)
+	}
 
 	m.hover = 0
 	if !ui.OverHUD(ScreenWidth, ScreenHeight, m.cursor.X, m.cursor.Y) {
@@ -149,7 +177,7 @@ func (m *Match) Update() {
 		}
 	}
 	shape := ebiten.CursorShapeDefault
-	if m.targeting {
+	if m.targeting || m.placing {
 		shape = ebiten.CursorShapeCrosshair
 	}
 	if shape != m.cursorMode {
@@ -166,6 +194,15 @@ func (m *Match) Update() {
 		m.pending = m.pending[:0]
 		if len(m.events) < 1024 {
 			m.events = append(m.events, m.world.Events...)
+		}
+		for _, ev := range m.world.Events {
+			if ev.Kind == sim.EvNotice && ev.Owner == m.player {
+				msg := ev.Notice.String()
+				if ev.Notice == sim.NoticeRequires {
+					msg += " " + faction.Unit(ev.Type).Name
+				}
+				m.say(msg)
+			}
 		}
 	}
 }
@@ -239,6 +276,13 @@ func (m *Match) pick(s geom.Vec) *sim.Unit {
 		if !m.revealAll && !m.world.VisibleTo(m.player, u) {
 			continue
 		}
+		if u.Def.Building {
+			// Units in front of a building win the click.
+			if u.Rect().Contains(p) && u.Def.Radius < bestD {
+				best, bestD = u, u.Def.Radius
+			}
+			continue
+		}
 		pos, _ := ui.DrawPos(u, m.clock.Alpha())
 		d := pos.Dist(p)
 		if d <= u.Def.Radius+0.25 && d < bestD {
@@ -251,8 +295,17 @@ func (m *Match) pick(s geom.Vec) *sim.Unit {
 func (m *Match) updateMouse() {
 	overHUD := ui.OverHUD(ScreenWidth, ScreenHeight, m.cursor.X, m.cursor.Y)
 
+	card := ui.CardRect(ScreenWidth, ScreenHeight)
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		b, onButton := ui.ButtonAt(m.card, card, m.cursor)
 		switch mp, onMap := m.minimapPoint(); {
+		case onButton:
+			m.press(b)
+		case m.placing:
+			if !overHUD {
+				m.place()
+			}
+		case m.clickQueue():
 		case m.targeting:
 			target := m.cam.ToWorld(m.cursor.X, m.cursor.Y)
 			var enemy *sim.Unit
@@ -290,23 +343,138 @@ func (m *Match) updateMouse() {
 	}
 
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-		if m.targeting {
-			m.targeting = false
+		if m.targeting || m.placing {
+			m.targeting, m.placing = false, false
 			return
 		}
 		if mp, onMap := m.minimapPoint(); onMap {
-			m.commandAt(mp, nil, false)
+			m.smartCommand(mp, nil)
 		} else if !overHUD {
-			var enemy *sim.Unit
-			if u := m.pick(m.cursor); u != nil && u.Owner != m.player {
-				enemy = u
-			}
-			m.commandAt(m.cam.ToWorld(m.cursor.X, m.cursor.Y), enemy, false)
+			m.smartCommand(m.cam.ToWorld(m.cursor.X, m.cursor.Y), m.pick(m.cursor))
 		}
 	}
 }
 
-// commandAt issues the smart command (or attack-move) for the selection.
+// place orders the selected workers to build at the placement ghost.
+func (m *Match) place() {
+	if n := m.world.CanPlace(m.player, m.placeType, m.placeX, m.placeY); n != sim.NoticeNone {
+		msg := n.String()
+		if req, ok := m.world.Missing(m.player, m.placeType); ok && n == sim.NoticeRequires {
+			msg += " " + faction.Unit(req).Name
+		}
+		m.say(msg)
+		return
+	}
+	m.issue(sim.Command{Kind: sim.CmdBuild, Units: m.own(), Type: m.placeType, TX: m.placeX, TY: m.placeY, Queue: modifierHeld()})
+	d := faction.Unit(m.placeType)
+	n := float64(d.Size) / 2
+	m.pings = append(m.pings, ping{geom.V(float64(m.placeX)+n, float64(m.placeY)+n), false})
+	if !modifierHeld() {
+		m.placing = false
+	}
+}
+
+// selectedBuilding returns the single selected own building, if any.
+func (m *Match) selectedBuilding() *sim.Unit {
+	if len(m.sel) != 1 {
+		return nil
+	}
+	u := m.world.Unit(m.sel[0])
+	if u == nil || u.Owner != m.player || !u.Def.Building {
+		return nil
+	}
+	return u
+}
+
+// clickQueue cancels the clicked production queue entry, if any.
+func (m *Match) clickQueue() bool {
+	b := m.selectedBuilding()
+	if b == nil {
+		return false
+	}
+	panel := ui.PanelRect(ScreenWidth, ScreenHeight)
+	for i := range b.Queue {
+		if ui.QueueSlotRect(panel, i).Contains(m.cursor) {
+			m.issue(sim.Command{Kind: sim.CmdCancel, Units: []sim.UnitID{b.ID}, Index: i})
+			return true
+		}
+	}
+	return false
+}
+
+// press runs a command-card button.
+func (m *Match) press(b ui.Button) {
+	own := m.own()
+	m.targeting = false
+	switch b.Kind {
+	case ui.ActBuild:
+		if !b.Enabled {
+			m.say(b.Reason)
+			return
+		}
+		m.placing, m.placeType = true, b.Type
+	case ui.ActTrain:
+		m.issue(sim.Command{Kind: sim.CmdTrain, Units: own, Type: b.Type})
+	case ui.ActAttack:
+		m.placing, m.targeting = false, true
+	case ui.ActStop:
+		m.issue(sim.Command{Kind: sim.CmdStop, Units: own})
+	case ui.ActHold:
+		m.issue(sim.Command{Kind: sim.CmdHold, Units: own})
+	case ui.ActCancel:
+		m.issue(sim.Command{Kind: sim.CmdCancel, Units: own, Index: -1})
+	}
+}
+
+// resourceNear returns the resource node under world point p, with a
+// little slop so single-tile crystals are easy to click.
+func (m *Match) resourceNear(p geom.Vec) *sim.Resource {
+	var best *sim.Resource
+	bestD := 0.35
+	for _, r := range m.world.Resources {
+		rect := r.Rect()
+		dx := max(rect.Min.X-p.X, 0, p.X-rect.Max.X)
+		dy := max(rect.Min.Y-p.Y, 0, p.Y-rect.Max.Y)
+		if d := math.Hypot(dx, dy); d <= bestD {
+			best, bestD = r, d
+		}
+	}
+	return best
+}
+
+// smartCommand is a right-click at world point p on unit u (may be nil):
+// attack enemies, gather resources, assist own buildings, otherwise move.
+// Selected buildings set their rally point instead.
+func (m *Match) smartCommand(p geom.Vec, u *sim.Unit) {
+	own := m.own()
+	if len(own) == 0 {
+		return
+	}
+	rally := sim.Command{Kind: sim.CmdRally, Units: own, Point: p}
+	res := m.resourceNear(p)
+	if u == nil && res != nil {
+		rally.Res = res.ID
+	}
+	if u != nil {
+		rally.Point = u.Pos
+	}
+	m.issue(rally)
+
+	switch {
+	case u != nil && u.Owner != m.player:
+		m.commandAt(p, u, false)
+	case u != nil:
+		m.issue(sim.Command{Kind: sim.CmdAssist, Units: own, Target: u.ID, Queue: modifierHeld()})
+		m.pings = append(m.pings, ping{u.Pos, false})
+	case res != nil:
+		m.issue(sim.Command{Kind: sim.CmdGather, Units: own, Res: res.ID, Queue: modifierHeld()})
+		m.pings = append(m.pings, ping{res.Pos, false})
+	default:
+		m.commandAt(p, nil, false)
+	}
+}
+
+// commandAt issues a move, attack, or attack-move for the selection.
 func (m *Match) commandAt(p geom.Vec, enemy *sim.Unit, attackMove bool) {
 	units := m.own()
 	if len(units) == 0 {
@@ -374,6 +542,10 @@ func (m *Match) finishSelect() {
 			ids = append(ids, u.ID)
 		}
 	}
+	// Like classic RTSes, a box with any units in it ignores buildings.
+	if slices.ContainsFunc(ids, func(id sim.UnitID) bool { return !m.world.Unit(id).Def.Building }) {
+		ids = slices.DeleteFunc(ids, func(id sim.UnitID) bool { return m.world.Unit(id).Def.Building })
+	}
 	if add {
 		m.addSelection(ids)
 	} else {
@@ -393,6 +565,11 @@ func (m *Match) onScreen(keep func(*sim.Unit) bool) []sim.UnitID {
 	return ids
 }
 
+var cardKey = map[string]ebiten.Key{
+	"Q": ebiten.KeyQ, "W": ebiten.KeyW, "E": ebiten.KeyE, "R": ebiten.KeyR, "T": ebiten.KeyT,
+	"A": ebiten.KeyA, "S": ebiten.KeyS, "H": ebiten.KeyH,
+}
+
 var digitKeys = [10]ebiten.Key{
 	ebiten.KeyDigit0, ebiten.KeyDigit1, ebiten.KeyDigit2, ebiten.KeyDigit3, ebiten.KeyDigit4,
 	ebiten.KeyDigit5, ebiten.KeyDigit6, ebiten.KeyDigit7, ebiten.KeyDigit8, ebiten.KeyDigit9,
@@ -401,25 +578,25 @@ var digitKeys = [10]ebiten.Key{
 func (m *Match) updateKeys() {
 	pressed := inpututil.IsKeyJustPressed
 	if pressed(ebiten.KeyShiftLeft) || pressed(ebiten.KeyShiftRight) {
-		m.say("SHIFT: The Forge's gear-shift modes arrive in M2")
+		m.say("SHIFT: The Forge's gear-shift modes arrive in the next update")
 	}
 	if pressed(ebiten.KeyEscape) {
-		if m.targeting {
+		switch {
+		case m.placing:
+			m.placing = false
+		case m.targeting:
 			m.targeting = false
-		} else {
+		case slices.ContainsFunc(m.card, func(b ui.Button) bool { return b.Kind == ui.ActCancel }):
+			m.press(ui.Button{Kind: ui.ActCancel})
+		default:
 			m.sel = m.sel[:0]
 		}
 	}
-	if own := m.own(); len(own) > 0 {
-		switch {
-		case pressed(ebiten.KeyA):
-			m.targeting = true
-		case pressed(ebiten.KeyS):
-			m.issue(sim.Command{Kind: sim.CmdStop, Units: own})
-			m.targeting = false
-		case pressed(ebiten.KeyH):
-			m.issue(sim.Command{Kind: sim.CmdHold, Units: own})
-			m.targeting = false
+	if !groupAssignHeld() {
+		for _, b := range m.card {
+			if k, ok := cardKey[b.Key]; ok && pressed(k) {
+				m.press(b)
+			}
 		}
 	}
 	for d, k := range digitKeys {
@@ -462,7 +639,7 @@ func (m *Match) updateKeys() {
 		}
 		p := m.cam.ToWorld(m.cursor.X, m.cursor.Y)
 		m.pending = append(m.pending, sim.Command{
-			Kind: sim.CmdSpawn, Player: owner, Point: p, SpawnType: types[i], SpawnCount: counts[i],
+			Kind: sim.CmdSpawn, Player: owner, Point: p, Type: types[i], Count: counts[i],
 		})
 		m.say(fmt.Sprintf("%s %d %ss", who, counts[i], faction.Unit(types[i]).Name))
 	}
@@ -489,11 +666,15 @@ func (m *Match) centroid(ids []sim.UnitID) geom.Vec {
 // View builds the renderer's view of this frame.
 func (m *Match) View() *ui.MatchView {
 	v := &ui.MatchView{
-		World: m.world, Player: m.player, Alpha: m.clock.Alpha(), Cam: &m.cam,
+		Sandbox: m.sandbox, World: m.world, Player: m.player, Alpha: m.clock.Alpha(), Cam: &m.cam,
 		Selected: m.sel, Hover: m.hover,
 		Dragging: m.dragging, DragFrom: m.dragFrom, Cursor: m.cursor,
 		Targeting: m.targeting, RevealAll: m.revealAll, Focused: ebiten.IsFocused(),
 		ShowHelp: m.showHelp, Message: m.msg, MessageAge: m.updates - m.msgAt,
+		Card: m.card, Placing: m.placing, PlaceType: m.placeType, PlaceX: m.placeX, PlaceY: m.placeY,
+	}
+	if m.placing {
+		v.PlaceNotice = m.world.CanPlace(m.player, m.placeType, m.placeX, m.placeY)
 	}
 	for i, g := range m.groups {
 		v.Groups[i] = len(g)

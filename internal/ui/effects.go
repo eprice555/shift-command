@@ -19,6 +19,9 @@ const (
 	fxDeath
 	fxPingMove
 	fxPingAttack
+	fxBuilt
+	fxReady
+	fxHeal
 )
 
 type fx struct {
@@ -51,6 +54,12 @@ func (r *Renderer) AddEvents(evs []sim.Event) {
 			}
 		case sim.EvDeath:
 			e.add(fx{kind: fxDeath, owner: ev.Owner, a: ev.From, life: 36, seed: e.seed})
+		case sim.EvBuildingDone:
+			e.add(fx{kind: fxBuilt, owner: ev.Owner, a: ev.From, b: geom.V(float64(faction.Unit(ev.Type).Size), 0), life: 40})
+		case sim.EvUnitReady:
+			e.add(fx{kind: fxReady, owner: ev.Owner, a: ev.From, life: 24})
+		case sim.EvHeal:
+			e.add(fx{kind: fxHeal, owner: ev.Owner, a: ev.From, b: ev.To, life: 10})
 		}
 	}
 }
@@ -127,6 +136,24 @@ func (e *effects) draw(em *ebiten.Image, v *MatchView, frame int) {
 					float32(ax+cs*d1*float64(scale)), float32(ay+sn*d1*float64(scale)),
 					2, scaleRGB(Whiten(col, 0.4), fade), true)
 			}
+		case fxBuilt:
+			if fogged(f.a) {
+				continue
+			}
+			h := float32(f.b.X/2+0.2+0.8*t) * scale
+			vector.StrokeRect(em, float32(ax)-h, float32(ay)-h, 2*h, 2*h, 2, scaleRGB(Whiten(col, 0.3), fade), true)
+		case fxReady:
+			if fogged(f.a) {
+				continue
+			}
+			vector.StrokeCircle(em, float32(ax), float32(ay), scale*float32(0.2+0.8*t), 1.5, scaleRGB(col, fade), true)
+		case fxHeal:
+			if fogged(f.a) && fogged(f.b) {
+				continue
+			}
+			bx, by := cam.ToScreen(f.b)
+			vector.StrokeLine(em, float32(ax), float32(ay), float32(bx), float32(by), 1.5, scaleRGB(colHPGood, fade*0.8), true)
+			vector.StrokeCircle(em, float32(bx), float32(by), scale*0.35, 1.5, scaleRGB(colHPGood, fade), true)
 		case fxPingMove, fxPingAttack:
 			c := colSelect
 			if f.kind == fxPingAttack {

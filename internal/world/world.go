@@ -10,33 +10,70 @@ import (
 	"github.com/eprice555/shift-command/internal/geom"
 )
 
-// Grid is a passability grid.
+// Grid is a passability grid with two layers: static terrain, and an
+// occupancy count for things placed during a match (buildings, resource
+// nodes). A tile is blocked if either layer blocks it.
 type Grid struct {
 	W, H    int
-	blocked []bool
+	terrain []bool
+	occ     []uint8
 
 	scratch *searchScratch // reused A* buffers; Grid is not goroutine-safe
 }
 
 // NewGrid returns a fully passable w×h grid.
 func NewGrid(w, h int) *Grid {
-	return &Grid{W: w, H: h, blocked: make([]bool, w*h)}
+	return &Grid{W: w, H: h, terrain: make([]bool, w*h), occ: make([]uint8, w*h)}
 }
 
 // InBounds reports whether (x, y) is a tile on the grid.
 func (g *Grid) InBounds(x, y int) bool { return x >= 0 && y >= 0 && x < g.W && y < g.H }
 
 // Blocked reports whether (x, y) is impassable. Out-of-bounds is blocked.
-func (g *Grid) Blocked(x, y int) bool { return !g.InBounds(x, y) || g.blocked[y*g.W+x] }
+func (g *Grid) Blocked(x, y int) bool {
+	if !g.InBounds(x, y) {
+		return true
+	}
+	i := y*g.W + x
+	return g.terrain[i] || g.occ[i] > 0
+}
+
+// Terrain reports whether (x, y) is static terrain (walls, rocks), ignoring
+// anything placed during a match. Out-of-bounds counts as terrain.
+func (g *Grid) Terrain(x, y int) bool { return !g.InBounds(x, y) || g.terrain[y*g.W+x] }
+
+// Occupied reports whether something placed during a match covers (x, y).
+func (g *Grid) Occupied(x, y int) bool { return g.InBounds(x, y) && g.occ[y*g.W+x] > 0 }
+
+// Occupy adds (delta > 0) or removes (delta < 0) one occupant from every
+// tile in the size×size square at (x, y). Overlapping occupants (an
+// Extractor on a vent) stack, so removing one leaves the other blocking.
+func (g *Grid) Occupy(x, y, size, delta int) {
+	for ty := y; ty < y+size; ty++ {
+		for tx := x; tx < x+size; tx++ {
+			if !g.InBounds(tx, ty) {
+				continue
+			}
+			i := ty*g.W + tx
+			g.occ[i] = uint8(max(0, int(g.occ[i])+delta))
+		}
+	}
+}
 
 // Passable is !Blocked.
 func (g *Grid) Passable(x, y int) bool { return !g.Blocked(x, y) }
 
-// SetBlocked marks (x, y); out-of-bounds is ignored.
+// SetBlocked marks (x, y) as terrain; out-of-bounds is ignored.
 func (g *Grid) SetBlocked(x, y int, b bool) {
 	if g.InBounds(x, y) {
-		g.blocked[y*g.W+x] = b
+		g.terrain[y*g.W+x] = b
 	}
+}
+
+// TileRect returns the world-space box covered by the size×size square of
+// tiles at (x, y).
+func TileRect(x, y, size int) geom.Rect {
+	return geom.Rect{Min: geom.V(float64(x), float64(y)), Max: geom.V(float64(x+size), float64(y+size))}
 }
 
 // TileOf returns the tile containing p.

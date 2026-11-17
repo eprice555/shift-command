@@ -5,6 +5,7 @@ import (
 
 	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
+	"github.com/eprice555/shift-command/internal/world"
 )
 
 // CommandKind is the type of a player command.
@@ -16,7 +17,13 @@ const (
 	CmdAttack                        // attack Target
 	CmdStop                          // drop all orders
 	CmdHold                          // drop all orders and hold position
-	CmdSpawn                         // debug: spawn SpawnCount × SpawnType at Point
+	CmdSpawn                         // debug: spawn Count × Type at Point
+	CmdGather                        // workers: gather Res
+	CmdBuild                         // one worker: build Type at tile (TX, TY)
+	CmdTrain                         // buildings: queue Type at the least busy one
+	CmdCancel                        // first building: cancel construction or queue entry Index (-1 = last)
+	CmdRally                         // buildings: rally new units to Point (or Res)
+	CmdAssist                        // workers: construct/repair Target or bank cargo there; others move to it
 )
 
 // Command is a player instruction. Commands are the only way input reaches
@@ -30,25 +37,104 @@ type Command struct {
 	// Queue appends the order instead of replacing current orders.
 	Queue bool
 
-	SpawnType  faction.UnitType
-	SpawnCount int
+	Res    ResourceID
+	Type   faction.UnitType
+	Count  int
+	TX, TY int
+	Index  int
 }
 
 func (w *World) apply(c *Command) {
 	if c.Kind == CmdSpawn {
-		if c.SpawnCount > 0 && c.SpawnType < faction.UnitTypeCount {
-			w.SpawnSquad(c.Player, c.SpawnType, c.SpawnCount, w.Map.Clamp(c.Point, 0.5))
+		if c.Count > 0 && c.Type < faction.UnitTypeCount {
+			w.SpawnSquad(c.Player, c.Type, c.Count, w.Map.Clamp(c.Point, 0.5))
 		}
 		return
 	}
-	units := w.owned(c)
+	all := w.owned(c)
+	if len(all) == 0 {
+		return
+	}
+	switch c.Kind {
+	case CmdTrain:
+		if c.Type < faction.UnitTypeCount {
+			w.train(c.Player, all, c.Type)
+		}
+		return
+	case CmdCancel:
+		for _, b := range all {
+			if b.Def.Building {
+				w.cancel(c.Player, b, c.Index)
+				return
+			}
+		}
+		return
+	case CmdRally:
+		for _, b := range all {
+			if b.Def.Building {
+				b.HasRally, b.Rally, b.RallyRes = true, w.Map.Clamp(c.Point, 0.5), 0
+				if r := w.resByID[c.Res]; r != nil {
+					b.Rally, b.RallyRes = r.Pos, r.ID
+				}
+			}
+		}
+		return
+	}
+	// The remaining commands only move mobile units.
+	units := all[:0:0]
+	for _, u := range all {
+		if !u.Def.Building {
+			units = append(units, u)
+		}
+	}
 	if len(units) == 0 {
+		return
+	}
+	switch c.Kind {
+	case CmdGather:
+		r := w.resByID[c.Res]
+		if r == nil {
+			return
+		}
+		if r.Kind == world.Flux && !w.mineable(c.Player, r) {
+			w.notice(c.Player, NoticeNeedVent, faction.Extractor)
+			return
+		}
+		for _, u := range units {
+			if u.Def.Worker {
+				w.give(u, Order{Kind: OrderGather, Res: r.ID}, c.Queue)
+			} else {
+				w.give(u, Order{Kind: OrderMove, Point: w.approach(u.Pos, u.Def.Radius, r.Rect())}, c.Queue)
+			}
+		}
+		return
+	case CmdBuild:
+		w.orderBuild(c, units)
+		return
+	case CmdAssist:
+		t := w.byID[c.Target]
+		if t == nil || t.Owner != c.Player {
+			return
+		}
+		for _, u := range units {
+			switch {
+			case u.Def.Worker && t.Def.Building && !t.Complete:
+				w.give(u, Order{Kind: OrderConstruct, Target: t.ID}, c.Queue)
+			case u.Def.Worker && t.Def.DropOff && u.Cargo > 0:
+				w.give(u, Order{Kind: OrderReturn}, c.Queue)
+			case u.Def.Worker && t.Def.Mech && t.HP < t.Def.HP && t != u:
+				w.give(u, Order{Kind: OrderRepair, Target: t.ID}, c.Queue)
+			default:
+				w.give(u, Order{Kind: OrderMove, Point: w.approach(u.Pos, u.Def.Radius, t.Rect())}, c.Queue)
+			}
+		}
 		return
 	}
 	switch c.Kind {
 	case CmdStop, CmdHold:
 		for _, u := range units {
 			u.clearOrders()
+			u.mining = 0
 			u.Hold = c.Kind == CmdHold
 		}
 	case CmdAttack:
@@ -57,7 +143,11 @@ func (w *World) apply(c *Command) {
 			return
 		}
 		for _, u := range units {
-			w.give(u, Order{Kind: OrderAttack, Target: t.ID}, c.Queue)
+			if u.Def.Armed() {
+				w.give(u, Order{Kind: OrderAttack, Target: t.ID}, c.Queue)
+			} else {
+				w.give(u, Order{Kind: OrderMove, Point: t.Pos}, c.Queue)
+			}
 		}
 	case CmdMove, CmdAttackMove:
 		kind := OrderMove
@@ -81,6 +171,37 @@ func (w *World) apply(c *Command) {
 			w.give(u, Order{Kind: kind, Point: p, group: g}, c.Queue)
 		}
 	}
+}
+
+// orderBuild sends the worker closest to the site to build there, after
+// checking the site and funds so the player gets immediate feedback.
+func (w *World) orderBuild(c *Command, units []*Unit) {
+	def := faction.Unit(c.Type)
+	if c.Type >= faction.UnitTypeCount || !def.Building {
+		return
+	}
+	if n := w.CanPlace(c.Player, c.Type, c.TX, c.TY); n != NoticeNone {
+		missing, _ := w.Missing(c.Player, c.Type)
+		w.notice(c.Player, n, missing)
+		return
+	}
+	site := world.TileRect(c.TX, c.TY, def.Size)
+	var best *Unit
+	bestD := math.Inf(1)
+	for _, u := range units {
+		if !u.Def.Worker || u.Def.Faction != def.Faction {
+			continue
+		}
+		if d := rectDist(site, u.Pos); d < bestD {
+			best, bestD = u, d
+		}
+	}
+	if best == nil {
+		return
+	}
+	n := float64(def.Size) / 2
+	w.give(best, Order{Kind: OrderBuild, Build: c.Type, TX: c.TX, TY: c.TY,
+		Point: geom.V(float64(c.TX)+n, float64(c.TY)+n)}, c.Queue)
 }
 
 // owned resolves the command's unit list to live units belonging to the
@@ -107,6 +228,9 @@ func (w *World) owned(c *Command) []*Unit {
 }
 
 func (w *World) give(u *Unit, o Order, queue bool) {
+	if len(u.Orders) > 0 && u.Orders[0].Kind == OrderGather {
+		u.lastRes = u.Orders[0].Res
+	}
 	if !queue || u.Hold {
 		u.clearOrders()
 	}

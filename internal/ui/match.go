@@ -29,8 +29,10 @@ var (
 // MatchView is everything the renderer needs to draw one match frame. The
 // engine owns this state; the renderer only reads it.
 type MatchView struct {
-	World  *sim.World
-	Player sim.PlayerID
+	// Sandbox is the M1 combat sandbox: no economy UI.
+	Sandbox bool
+	World   *sim.World
+	Player  sim.PlayerID
 	// Alpha is the fraction [0,1) between the last sim tick and the next.
 	Alpha float64
 	Cam   *Camera
@@ -51,6 +53,15 @@ type MatchView struct {
 	MessageAge int
 	// Groups holds the live unit count of each control group 0–9.
 	Groups [10]int
+
+	// Card is the command card for the selection.
+	Card []Button
+	// Placing shows a building footprint at tile (PlaceX, PlaceY);
+	// PlaceNotice is why it can't go there (NoticeNone if it can).
+	Placing        bool
+	PlaceType      faction.UnitType
+	PlaceX, PlaceY int
+	PlaceNotice    sim.Notice
 }
 
 // PlayerColor returns the draw color for units owned by p, seen by viewer.
@@ -87,7 +98,7 @@ func (c *matchCache) ensure(m *world.Map) {
 	for y := range m.H {
 		for x := range m.W {
 			i := 4 * (y*m.W + x)
-			if m.Blocked(x, y) {
+			if m.Terrain(x, y) {
 				pix[i], pix[i+1], pix[i+2], pix[i+3] = 0x4A, 0x44, 0xB8, 0xFF
 			} else {
 				pix[i], pix[i+1], pix[i+2], pix[i+3] = 0x10, 0x16, 0x2A, 0xFF
@@ -103,7 +114,7 @@ func (c *matchCache) ensure(m *world.Map) {
 func wallEdges(g *world.Grid) []seg {
 	var out []seg
 	edge := func(x, y, dx, dy int) bool {
-		return g.Blocked(x, y) && g.InBounds(x+dx, y+dy) && !g.Blocked(x+dx, y+dy)
+		return g.Terrain(x, y) && g.InBounds(x+dx, y+dy) && !g.Terrain(x+dx, y+dy)
 	}
 	for _, dy := range []int{-1, 1} {
 		off := 0.0
@@ -183,7 +194,7 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 	x1, y1 := min(int(vis.Max.X)+1, w.Map.W-1), min(int(vis.Max.Y)+1, w.Map.H-1)
 	for ty := y0; ty <= y1; ty++ {
 		for tx := x0; tx <= x1; tx++ {
-			if w.Map.Blocked(tx, ty) {
+			if w.Map.Terrain(tx, ty) {
 				sx, sy := cam.ToScreen(geom.V(float64(tx), float64(ty)))
 				vector.FillRect(screen, float32(sx), float32(sy), float32(scale)+0.5, float32(scale)+0.5, colWallFill, false)
 			}
@@ -220,9 +231,17 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 		if !sel {
 			a = 0.45
 		}
+		if u.Def.Building {
+			rect := u.Rect()
+			p0 := cam.ToScreenV(rect.Min.Sub(geom.V(0.05, 0.05)))
+			p1 := cam.ToScreenV(rect.Max.Add(geom.V(0.05, 0.05)))
+			vector.StrokeRect(screen, float32(p0.X), float32(p0.Y), float32(p1.X-p0.X), float32(p1.Y-p0.Y), ringW, withAlpha(col, a), true)
+			continue
+		}
 		vector.StrokeCircle(screen, float32(sx), float32(sy), float32((u.Def.Radius+0.18)*scale), ringW, withAlpha(col, a), true)
 	}
 
+	r.drawResources(screen, em, v, vis)
 	r.drawUnits(screen, em, v, vis)
 	r.fx.draw(em, v, r.frame)
 	r.bloom.composite(screen)
@@ -238,7 +257,11 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 	}
 
 	r.drawFog(screen, v)
+	r.drawGhosts(screen, v)
+	r.drawRally(screen, v)
 	r.drawHPBars(screen, v, vis)
+	drawBuildBars(screen, v, vis)
+	r.drawPlacement(screen, v)
 	if v.Dragging {
 		box := geom.RectFrom(v.DragFrom, v.Cursor)
 		vector.FillRect(screen, float32(box.Min.X), float32(box.Min.Y), float32(box.W()), float32(box.H()), withAlpha(colSelect, 0.08), false)
@@ -290,6 +313,14 @@ func unitShape(dst []geom.Vec, t faction.UnitType) []geom.Vec {
 			dst = append(dst, geom.V(c, s))
 		}
 		return dst
+	case faction.Rigger:
+		return append(dst, geom.V(0.95, 0), geom.V(0.3, 0.8), geom.V(-0.8, 0.8), geom.V(-0.8, -0.8), geom.V(0.3, -0.8))
+	case faction.Mender:
+		const a, b = 0.95, 0.36
+		return append(dst, geom.V(a, b), geom.V(b, b), geom.V(b, a), geom.V(-b, a), geom.V(-b, b), geom.V(-a, b),
+			geom.V(-a, -b), geom.V(-b, -b), geom.V(-b, -a), geom.V(b, -a), geom.V(b, -b), geom.V(a, -b))
+	case faction.Bastion:
+		return append(dst, geom.V(0.9, 0.62), geom.V(-0.9, 0.62), geom.V(-0.9, -0.62), geom.V(0.9, -0.62))
 	default:
 		const k = 0.78
 		return append(dst, geom.V(k, k), geom.V(-k, k), geom.V(-k, -k), geom.V(k, -k))
@@ -303,6 +334,8 @@ func barrel(t faction.UnitType) float64 {
 		return 1.6
 	case faction.Trooper:
 		return 1.35
+	case faction.Bastion:
+		return 1.7
 	}
 	return 0
 }
@@ -316,12 +349,18 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		c.stroke[p].Reset()
 	}
 	var pts []geom.Vec
+	var cargo []*sim.Unit
 	for _, u := range v.World.Units {
 		if !unitVisible(v, u) {
 			continue
 		}
 		pos, facing := DrawPos(u, v.Alpha)
 		if pos.X < vis.Min.X-2 || pos.X > vis.Max.X+2 || pos.Y < vis.Min.Y-2 || pos.Y > vis.Max.Y+2 {
+			continue
+		}
+		fill, stroke := &c.fill[u.Owner], &c.stroke[u.Owner]
+		if u.Def.Building {
+			buildingOutline(fill, stroke, u.Type, u.Rect(), u.Complete, cam)
 			continue
 		}
 		sx, sy := cam.ToScreen(pos)
@@ -331,7 +370,6 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			return float32(sx + (q.X*cos-q.Y*sin)*rad), float32(sy + (q.X*sin+q.Y*cos)*rad)
 		}
 		pts = unitShape(pts[:0], u.Type)
-		fill, stroke := &c.fill[u.Owner], &c.stroke[u.Owner]
 		for i, q := range pts {
 			x, y := at(q)
 			if i == 0 {
@@ -350,6 +388,9 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			x, y = at(geom.V(l, 0))
 			stroke.LineTo(x, y)
 		}
+		if u.Cargo > 0 {
+			cargo = append(cargo, u)
+		}
 	}
 	for p := range sim.PlayerID(sim.NumPlayers) {
 		col := PlayerColor(p, v.Player)
@@ -361,6 +402,10 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		dop = &vector.DrawPathOptions{AntiAlias: true}
 		dop.ColorScale.ScaleWithColor(col)
 		vector.StrokePath(em, &c.stroke[p], sop, dop)
+	}
+	for _, u := range cargo {
+		pos, facing := DrawPos(u, v.Alpha)
+		drawCargo(em, v, u, pos, facing)
 	}
 }
 
