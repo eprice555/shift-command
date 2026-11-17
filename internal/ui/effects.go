@@ -22,6 +22,9 @@ const (
 	fxBuilt
 	fxReady
 	fxHeal
+	fxSplash
+	fxAura
+	fxShift
 )
 
 type fx struct {
@@ -49,7 +52,9 @@ func (r *Renderer) AddEvents(evs []sim.Event) {
 		switch ev.Kind {
 		case sim.EvShot:
 			e.add(fx{kind: fxShot, owner: ev.Owner, attack: ev.Attack, a: ev.From, b: ev.To, life: 7})
-			if ev.Attack == faction.Explosive {
+			if ev.Splash > 0 {
+				e.add(fx{kind: fxSplash, owner: ev.Owner, a: ev.To, b: geom.V(ev.Splash, 0), life: 22})
+			} else if ev.Attack == faction.Explosive {
 				e.add(fx{kind: fxImpact, owner: ev.Owner, a: ev.To, life: 16})
 			}
 		case sim.EvDeath:
@@ -58,6 +63,10 @@ func (r *Renderer) AddEvents(evs []sim.Event) {
 			e.add(fx{kind: fxBuilt, owner: ev.Owner, a: ev.From, b: geom.V(float64(faction.Unit(ev.Type).Size), 0), life: 40})
 		case sim.EvUnitReady:
 			e.add(fx{kind: fxReady, owner: ev.Owner, a: ev.From, life: 24})
+		case sim.EvAura:
+			e.add(fx{kind: fxAura, owner: ev.Owner, a: ev.From, b: geom.V(ev.Splash, 0), life: 30})
+		case sim.EvShift:
+			e.add(fx{kind: fxShift, owner: ev.Owner, a: ev.From, life: 18})
 		case sim.EvHeal:
 			e.add(fx{kind: fxHeal, owner: ev.Owner, a: ev.From, b: ev.To, life: 10})
 		}
@@ -154,6 +163,26 @@ func (e *effects) draw(em *ebiten.Image, v *MatchView, frame int) {
 			bx, by := cam.ToScreen(f.b)
 			vector.StrokeLine(em, float32(ax), float32(ay), float32(bx), float32(by), 1.5, scaleRGB(colHPGood, fade*0.8), true)
 			vector.StrokeCircle(em, float32(bx), float32(by), scale*0.35, 1.5, scaleRGB(colHPGood, fade), true)
+		case fxSplash:
+			if fogged(f.a) {
+				continue
+			}
+			ease := 1 - (1-t)*(1-t)
+			rad := scale * float32(f.b.X*(0.3+0.7*ease))
+			vector.StrokeCircle(em, float32(ax), float32(ay), rad, 3, scaleRGB(Whiten(col, 0.3), fade), true)
+			vector.StrokeCircle(em, float32(ax), float32(ay), rad*0.55, 1.5, scaleRGB(col, fade*0.7), true)
+		case fxAura:
+			if fogged(f.a) {
+				continue
+			}
+			rad := scale * float32(f.b.X*t)
+			vector.StrokeCircle(em, float32(ax), float32(ay), rad, 1.5, scaleRGB(colHPGood, fade*0.6), true)
+		case fxShift:
+			if fogged(f.a) {
+				continue
+			}
+			rad := scale * float32(1.2-0.8*t)
+			vector.StrokeCircle(em, float32(ax), float32(ay), rad, 2, scaleRGB(Whiten(col, 0.5), fade), true)
 		case fxPingMove, fxPingAttack:
 			c := colSelect
 			if f.kind == fxPingAttack {

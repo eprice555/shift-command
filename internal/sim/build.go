@@ -27,6 +27,9 @@ const (
 	NoticeQueueFull        // production queue full
 	NoticeRequires         // tech requirement missing (Event.Type names it)
 	NoticeNeedVent         // extractor must go on a free vent
+	NoticeLowHP            // not enough HP to pay for a SHIFT mode
+	NoticeBusy             // building must finish its queue before packing
+	NoticeCantLand         // no clear ground under a packed building
 )
 
 // String is the player-facing text for n.
@@ -46,6 +49,12 @@ func (n Notice) String() string {
 		return "Requires"
 	case NoticeNeedVent:
 		return "Must be placed on a free flux vent"
+	case NoticeLowHP:
+		return "Not enough HP to Overdrive"
+	case NoticeBusy:
+		return "Finish or cancel production before packing up"
+	case NoticeCantLand:
+		return "Can't land here"
 	}
 	return ""
 }
@@ -60,10 +69,14 @@ func ticksFor(sec float64) int { return max(1, int(math.Round(sec*TicksPerSecond
 // Rect is a building's footprint. For mobile units it is the bounding box
 // of the body.
 func (u *Unit) Rect() geom.Rect {
-	if u.Def.Building {
+	if u.Def.Building && !u.lifted {
 		return world.TileRect(u.TileX, u.TileY, u.Def.Size)
 	}
 	r := geom.V(u.Def.Radius, u.Def.Radius)
+	if u.Def.Building {
+		h := float64(u.Def.Size) / 2
+		r = geom.V(h, h)
+	}
 	return geom.Rect{Min: u.Pos.Sub(r), Max: u.Pos.Add(r)}
 }
 
@@ -178,13 +191,7 @@ func (w *World) PlaceBuilding(owner PlayerID, t faction.UnitType, x, y int, comp
 			v.Extractor = u.ID
 		}
 	}
-	rect := u.Rect()
-	for _, o := range w.Units {
-		if !o.Def.Building && rectDist(rect, o.Pos) < o.Def.Radius {
-			o.Pos = w.Map.ResolveCircle(w.Map.SnapPassable(w.approach(o.Pos, o.Def.Radius, rect)), o.Def.Radius)
-			o.resetNav()
-		}
-	}
+	w.clearFootprint(u.Rect())
 	w.Fog[owner].Reveal(u.Pos, def.Sight)
 	return u
 }
@@ -369,8 +376,12 @@ func (w *World) returnOrder(u *Unit) geom.Vec {
 // heal looks after a healer's patients. It reports whether it is busy
 // healing (or walking to a patient).
 func (w *World) heal(u *Unit) (geom.Vec, bool) {
+	if u.Def.HealAura {
+		w.aura(u)
+		return geom.Vec{}, true
+	}
 	reach := u.Def.Sight
-	if u.Hold {
+	if u.Hold || u.Def.Speed == 0 {
 		reach = u.Def.HealRange
 	}
 	var best *Unit
@@ -389,7 +400,7 @@ func (w *World) heal(u *Unit) (geom.Vec, bool) {
 	}
 	u.healing = best.ID
 	if bestD > u.Def.HealRange {
-		if u.Hold {
+		if u.Hold || u.Def.Speed == 0 {
 			return geom.Vec{}, false
 		}
 		return w.steer(u, best.Pos, nil), true

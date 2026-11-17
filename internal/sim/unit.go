@@ -56,6 +56,7 @@ type Unit struct {
 	Orders             []Order
 	Hold               bool // hold position: fire in range, never move
 	Moving             bool // moved under its own power last tick
+	Mode               int  // SHIFT mode: 0 base, 1 shifted (see faction.Mode)
 
 	// Buildings.
 	TileX, TileY int                // footprint top-left
@@ -86,6 +87,11 @@ type Unit struct {
 	stall    int     // ticks without getting closer to the goal
 	stuck    int     // ticks spent trying to move but barely moving
 	arrived  *moveGroup
+
+	shifting   int  // ticks left switching modes
+	shiftTotal int  // length of the current switch
+	modeLeft   int  // ticks left on a timed mode
+	lifted     bool // packed building in the air
 }
 
 // Target returns the unit this one is currently fighting, or 0.
@@ -160,16 +166,25 @@ func (w *World) think(u *Unit) geom.Vec {
 		u.Cooldown--
 	}
 	u.firing, u.working = false, false
+	if w.tickShift(u) {
+		return geom.Vec{}
+	}
 	if u.Def.Building {
-		w.produce(u)
+		if u.lifted {
+			return w.fly(u)
+		}
+		if u.Mode == 0 {
+			w.produce(u)
+		}
 		return geom.Vec{}
 	}
 
 	// An explicit attack order overrides everything until the target dies
-	// or is lost in the fog.
+	// or is lost in the fog (or, for a unit that can't move, leaves its
+	// range).
 	for len(u.Orders) > 0 && u.Orders[0].Kind == OrderAttack {
 		t := w.byID[u.Orders[0].Target]
-		if t == nil || !w.VisibleTo(u.Owner, t) {
+		if t == nil || !w.VisibleTo(u.Owner, t) || u.Def.Speed == 0 && !inReach(u, t) {
 			u.popOrder()
 			continue
 		}
@@ -207,7 +222,7 @@ func (w *World) think(u *Unit) geom.Vec {
 	}
 	// Workers only fight when told to (attack order or attack-move).
 	if (o == nil && !u.Def.Worker || o != nil && o.Kind == OrderAttackMove) && u.Def.Armed() {
-		if t := w.byID[u.target]; t == nil || !w.VisibleTo(u.Owner, t) || (u.Hold && gap(u, t) > u.Def.Weapon.Range) {
+		if t := w.byID[u.target]; t == nil || !w.VisibleTo(u.Owner, t) || (u.pinned() && !inReach(u, t)) {
 			u.target = 0
 		}
 		// Scanning for targets is staggered across ticks to spread the cost.
@@ -215,7 +230,7 @@ func (w *World) think(u *Unit) geom.Vec {
 			u.target = w.acquire(u)
 		}
 		if t := w.byID[u.target]; t != nil {
-			return w.engage(u, t, !u.Hold)
+			return w.engage(u, t, !u.pinned())
 		}
 	} else {
 		u.target = 0
@@ -231,12 +246,16 @@ func (w *World) think(u *Unit) geom.Vec {
 	return v
 }
 
+// pinned reports whether the unit stays put when fighting: holding
+// position, or in an immobile SHIFT mode.
+func (u *Unit) pinned() bool { return u.Hold || u.Def.Speed == 0 }
+
 // acquire picks the nearest visible enemy within the unit's acquisition
-// range (weapon range when holding, sight otherwise), preferring units over
-// buildings.
+// range (weapon range when pinned, sight otherwise), preferring units over
+// buildings. Enemies inside a weapon's minimum range are ignored.
 func (w *World) acquire(u *Unit) UnitID {
 	reach := u.Def.Sight
-	if u.Hold {
+	if u.pinned() {
 		reach = u.Def.Weapon.Range
 	}
 	best, bestScore := UnitID(0), math.Inf(1)
@@ -245,7 +264,7 @@ func (w *World) acquire(u *Unit) UnitID {
 			continue
 		}
 		d := gap(u, e)
-		if d > reach {
+		if d > reach || tooClose(u, d) {
 			continue
 		}
 		if e.Def.Building {
@@ -262,22 +281,30 @@ func (w *World) acquire(u *Unit) UnitID {
 func (w *World) engage(u, t *Unit, canMove bool) geom.Vec {
 	u.resetProgress()
 	wp := u.Def.Weapon
-	if gap(u, t) <= wp.Range {
+	if d := gap(u, t); tooClose(u, d) {
+		// Too close to hit: let it pick something else.
+		u.target = 0
+		return geom.Vec{}
+	} else if d <= wp.Range {
 		u.Facing = t.Pos.Sub(u.Pos).Angle()
 		u.firing = true
 		if u.Cooldown == 0 {
 			u.Cooldown = cooldownTicks(wp.Cooldown)
 			w.hits = append(w.hits, hit{t.ID, wp.DamageTo(t.Def)})
+			if wp.Splash > 0 {
+				w.splash(u, t)
+			}
 			dir := t.Pos.Sub(u.Pos).Norm()
 			w.Events = append(w.Events, Event{
 				Kind: EvShot, Owner: u.Owner, Type: u.Type, Attack: wp.Type,
-				From: u.Pos.Add(dir.Scale(u.Def.Radius)),
-				To:   t.Pos.Sub(dir.Scale(min(t.Def.Radius, 1) * 0.5)),
+				From:   u.Pos.Add(dir.Scale(u.Def.Radius)),
+				To:     t.Pos.Sub(dir.Scale(min(t.Def.Radius, 1) * 0.5)),
+				Splash: wp.Splash,
 			})
 		}
 		return geom.Vec{}
 	}
-	if !canMove {
+	if !canMove || u.Def.Speed == 0 {
 		return geom.Vec{}
 	}
 	if t.Def.Building {

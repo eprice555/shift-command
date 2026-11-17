@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"slices"
 
 	"github.com/eprice555/shift-command/internal/faction"
 	"github.com/eprice555/shift-command/internal/geom"
@@ -19,6 +20,7 @@ const (
 	ActStop
 	ActHold
 	ActCancel // cancel construction or the last queued unit
+	ActShift  // toggle the selection's SHIFT modes
 )
 
 // Command card layout: two rows of five buttons.
@@ -36,7 +38,7 @@ const (
 // cardKeys are the hotkeys by grid position.
 var cardKeys = [CardRows][CardCols]string{
 	{"Q", "W", "E", "R", "T"},
-	{"A", "S", "H", "", "ESC"},
+	{"A", "S", "H", "SHIFT", "ESC"},
 }
 
 // Button is one command-card slot.
@@ -51,6 +53,8 @@ type Button struct {
 	Enabled bool
 	// Reason explains why the button is disabled.
 	Reason string
+	// Mixed is set on a SHIFT button covering several unit types.
+	Mixed bool
 }
 
 // CardRect returns the command card's screen rect.
@@ -176,11 +180,69 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 				}
 			}
 		}
+		if building.Mode == 1 && !building.Shifting() {
+			slot(1, 1, ActStop, 0, "STOP")
+		}
 		if !building.Complete || len(building.Queue) > 0 {
 			slot(1, 4, ActCancel, 0, "CANCEL")
 		}
 	}
+	if b, ok := shiftButton(units, !mobile); ok {
+		out = append(out, b)
+	}
 	return out
+}
+
+// modeLabels abbreviates mode names for the command card.
+var modeLabels = map[string]string{
+	"Overdrive": "OVRDV", "Normal": "OVRDV",
+	"Boost": "BOOST", "Cruise": "CRUISE",
+	"Planted": "PLANT", "Walk": "WALK",
+	"Field Post": "POST", "Mobile": "MOBILE",
+	"Artillery": "ARTY", "Tank": "TANK",
+	"Packed": "PACK", "Landed": "LAND",
+}
+
+// shiftButton returns the SHIFT slot for the selection, labeled with the
+// mode a press would switch to. A building selection only counts its
+// first building, like the rest of the building card.
+func shiftButton(units []*sim.Unit, buildings bool) (Button, bool) {
+	var types []faction.UnitType
+	toShift := map[faction.UnitType]bool{}
+	for _, u := range units {
+		if u.Def.Building != buildings {
+			continue
+		}
+		if buildings && len(types) > 0 {
+			break
+		}
+		m := faction.Unit(u.Type).Shift
+		if m == nil || !u.Complete {
+			if buildings {
+				break
+			}
+			continue
+		}
+		if !slices.Contains(types, u.Type) {
+			types = append(types, u.Type)
+		}
+		if u.Mode == 0 || m.Timed() {
+			toShift[u.Type] = true
+		}
+	}
+	if len(types) == 0 {
+		return Button{}, false
+	}
+	b := Button{Kind: ActShift, Type: types[0], Row: 1, Col: 3, Key: cardKeys[1][3], Label: "SHIFT", Enabled: true, Mixed: len(types) > 1}
+	if !b.Mixed {
+		m := faction.Unit(types[0]).Shift
+		name := m.Base
+		if toShift[types[0]] {
+			name = m.Name
+		}
+		b.Label = modeLabels[name]
+	}
+	return b, true
 }
 
 // Queue slots in the selection panel for a single building.

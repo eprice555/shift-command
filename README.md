@@ -15,7 +15,8 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 - **M0 (skeleton)**: window, neon renderer with a glow pass, fixed 20 ticks/s simulation, and CI that builds the WASM version and deploys it to GitHub Pages on every push to `main`.
 - **M1 (RTS core)**: a sandbox skirmish on the map *Neon Crossing*. Both sides get a mixed squad of Forge units (Trooper, Outrider, Strider), and the enemy has a forward group to fight. It includes a camera with pan and zoom, a minimap, box/click/double-click selection, control groups, A* pathfinding and flow fields for group moves, separation steering, combat with attack/armor bonuses, and fog of war. That sandbox is still available with `-demo`.
 - **M2a (economy, base building, production)**: the match is now a real skirmish. Each side starts with a Command Hub and 6 Riggers. Riggers mine Crystals on their own; you build Generators (supply), Extractors on flux vents (Flux), a Drill Yard and a Foundry, then train Troopers, Outriders, Menders, Striders and Bastions. Destroy every enemy building to win. All stats are placeholders.
-- **M2b (enemy AI)**: the enemy Forge now plays. It follows a data-driven build order, mines and takes Flux, adds production, expands to its natural at around 4 minutes, and keeps its supply ahead. It defends its base, gathers an army at a staging point, attacks when the wave is big enough (each wave is bigger than the last), and retreats when a fight turns against it. It scouts expansions to find your buildings. There is one difficulty for now (Easy/Normal/Hard come in M5) and it does not use SHIFT yet. When the enemy hits something of yours off-screen, you get an **Under attack!** message and a red ping on the minimap; press **Space** to jump there. Forge SHIFT modes are next.
+- **M2b (enemy AI)**: the enemy Forge now plays. It follows a data-driven build order, mines and takes Flux, adds production, expands to its natural at around 4 minutes, and keeps its supply ahead. It defends its base, gathers an army at a staging point, attacks when the wave is big enough (each wave is bigger than the last), and retreats when a fight turns against it. It scouts expansions to find your buildings. There is one difficulty for now (Easy/Normal/Hard come in M5). When the enemy hits something of yours off-screen, you get an **Under attack!** message and a red ping on the minimap; press **Space** to jump there.
+- **M2c (Forge SHIFT modes)**: press **Shift** (or the SHIFT slot on the command card) to switch the selection's gear-shift mode; see the table below. The enemy AI uses them too: it sieges Bastions and plants Striders near enemies, overdrives Troopers into fights, boosts Outriders while travelling, and packs everything up before retreating. The enemy never relocates its buildings.
 
 The title screen still has the M0 demo: press **Shift** to morph between the faction emblems, then press **Enter** or click to deploy.
 
@@ -29,6 +30,19 @@ The title screen still has the M0 demo: press **Shift** to morph between the fac
 
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 
+### Forge SHIFT modes
+
+Shift toggles every selected unit type separately: if any unit of a type is in its normal mode, all of that type switch; otherwise they all switch back. Overdrive always re-fires.
+
+| Unit | SHIFT mode | Effect |
+|---|---|---|
+| Trooper | **Overdrive** | +50% move and attack speed for 8 s; costs 10 HP per use (needs more than 10 HP) |
+| Outrider | **Cruise / Boost** | Boost doubles speed but can't attack |
+| Strider | **Walk / Planted** | Planted: +3 range, can't move (1 s to switch) |
+| Mender | **Mobile / Field Post** | Field Post: heals every infantry unit within 4 at once, can't move (1 s to switch) |
+| Bastion | **Tank / Artillery** | Artillery: range 13 splash shells (no friendly fire), minimum range 2, can't move (2 s to switch) |
+| Command Hub, Drill Yard, Foundry | **Landed / Packed** | Packed: the building lifts off (1.5 s), can't train or accept resources, and flies over walls when you right click. Press Shift again to land on a clear site nearby. It still provides supply and can be attacked. You must empty the production queue first |
+
 ## Controls (so far)
 
 | Input | Action |
@@ -37,7 +51,7 @@ The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-ca
 | **Double-click** | Select all units of that type on screen |
 | **Tab** or **F** + click | Add to/toggle selection; with an order, queue it |
 | **Right click** | Move, attack the enemy under the cursor, gather from crystals/vents, or help build/repair your building |
-| **Right click** (building selected) | Set the rally point |
+| **Right click** (building selected) | Set the rally point; a packed building flies there instead |
 | **Q W E R T** | Command card: build (worker selected) or train (building selected) |
 | **A**, then left click | Attack-move (click an enemy to attack it) |
 | **S** / **H** | Stop / hold position |
@@ -47,7 +61,7 @@ The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-ca
 | **Mouse wheel** | Zoom |
 | **Minimap** | Left click/drag: jump camera; right click: move |
 | **Space** | Jump the camera to the last "Under attack!" alert |
-| **Shift** | Faction SHIFT ability (Forge modes arrive in the next update) |
+| **Shift** | Faction SHIFT ability: switch the selection's gear-shift modes (see above) |
 | **Esc** | Cancel placement or targeting, then cancel the last queued unit / construction, then deselect |
 | **Click a queue slot** | Cancel that queued unit (refunded) |
 | **F1** | Toggle the controls panel |

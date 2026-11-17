@@ -24,6 +24,7 @@ const (
 	CmdCancel                        // first building: cancel construction or queue entry Index (-1 = last)
 	CmdRally                         // buildings: rally new units to Point (or Res)
 	CmdAssist                        // workers: construct/repair Target or bank cargo there; others move to it
+	CmdShift                         // toggle SHIFT modes (Index -1), or set mode Index (0 base, 1 shifted)
 )
 
 // Command is a player instruction. Commands are the only way input reaches
@@ -69,9 +70,12 @@ func (w *World) apply(c *Command) {
 			}
 		}
 		return
+	case CmdShift:
+		w.shift(c, all)
+		return
 	case CmdRally:
 		for _, b := range all {
-			if b.Def.Building {
+			if b.Def.Building && b.Mode == 0 {
 				b.HasRally, b.Rally, b.RallyRes = true, w.Map.Clamp(c.Point, 0.5), 0
 				if r := w.resByID[c.Res]; r != nil {
 					b.Rally, b.RallyRes = r.Pos, r.ID
@@ -80,10 +84,15 @@ func (w *World) apply(c *Command) {
 		}
 		return
 	}
-	// The remaining commands only move mobile units.
+	// The remaining commands only move mobile units (and packed buildings,
+	// which fly wherever they are sent). Units in an immobile mode only
+	// take stop, hold, and attack orders.
 	units := all[:0:0]
 	for _, u := range all {
-		if !u.Def.Building {
+		switch {
+		case u.Def.Building && u.Mode == 0:
+		case u.Def.Speed == 0 && c.Kind != CmdStop && c.Kind != CmdHold && c.Kind != CmdAttack:
+		default:
 			units = append(units, u)
 		}
 	}
@@ -145,7 +154,7 @@ func (w *World) apply(c *Command) {
 		for _, u := range units {
 			if u.Def.Armed() {
 				w.give(u, Order{Kind: OrderAttack, Target: t.ID}, c.Queue)
-			} else {
+			} else if u.Def.Speed > 0 {
 				w.give(u, Order{Kind: OrderMove, Point: t.Pos}, c.Queue)
 			}
 		}
@@ -168,6 +177,11 @@ func (w *World) apply(c *Command) {
 			}
 		}
 		for _, u := range units {
+			if u.Def.Building {
+				// Packed buildings fly over anything.
+				w.give(u, Order{Kind: OrderMove, Point: w.Map.Clamp(c.Point, float64(u.Def.Size)/2)}, c.Queue)
+				continue
+			}
 			w.give(u, Order{Kind: kind, Point: p, group: g}, c.Queue)
 		}
 	}

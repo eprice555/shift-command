@@ -27,6 +27,7 @@ func (a *AI) army(w *sim.World) {
 		}
 	}
 	threat, threatened := a.threat(w)
+	defer a.shifts(w)
 
 	switch a.mode {
 	case attack:
@@ -77,7 +78,7 @@ func (a *AI) push(w *sim.World) {
 		}
 	}
 	if len(front) == 0 && len(staged) < reinforceMin {
-		a.fallBack()
+		a.fallBack(w)
 		return
 	}
 	at := a.centroid(front)
@@ -85,7 +86,7 @@ func (a *AI) push(w *sim.World) {
 		at = a.centroid(staged)
 	}
 	if s.armySupply < retreatShare*a.attackStart || a.power(w, at, true) > retreatOdds*a.power(w, at, false) {
-		a.fallBack()
+		a.fallBack(w)
 		a.order(sim.CmdMove, a.ids(s.army), a.staging)
 		return
 	}
@@ -102,7 +103,8 @@ func (a *AI) push(w *sim.World) {
 	}
 }
 
-func (a *AI) fallBack() {
+func (a *AI) fallBack(w *sim.World) {
+	a.unsiege(w)
 	a.mode = muster
 	a.waveSize = min(maxWave, a.waveSize+waveGrowth)
 }
