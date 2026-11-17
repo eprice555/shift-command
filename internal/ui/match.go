@@ -355,6 +355,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 	}
 	var pts []geom.Vec
 	var cargo []*sim.Unit
+	var rings []ring
 	for _, u := range v.World.Units {
 		if !unitVisible(v, u) {
 			continue
@@ -364,8 +365,25 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			continue
 		}
 		fill, stroke := &c.fill[u.Owner], &c.stroke[u.Owner]
+		frac := 0.0
+		if faction.Unit(u.Type).Shift != nil {
+			frac = u.ShiftFrac()
+		}
 		if u.Def.Building {
-			buildingOutline(fill, stroke, u.Type, u.Rect(), u.Complete, cam)
+			rect := u.Rect()
+			if frac > 0 {
+				// Packed buildings hover: draw them raised over a shadow.
+				h := float64(u.Def.Size) / 2
+				if u.Lifted() {
+					rect = geom.Rect{Min: pos.Sub(geom.V(h, h)), Max: pos.Add(geom.V(h, h))}
+				}
+				a, b := cam.ToScreenV(rect.Min), cam.ToScreenV(rect.Max)
+				vector.FillRect(screen, float32(a.X), float32(a.Y), float32(b.X-a.X), float32(b.Y-a.Y), color.RGBA{0, 0, 0, uint8(0x70 * frac)}, false)
+				lift := geom.V(0, -liftHeight*frac)
+				rect = geom.Rect{Min: rect.Min.Add(lift), Max: rect.Max.Add(lift)}
+				thrusters(stroke, rect, frac, cam)
+			}
+			buildingOutline(fill, stroke, u.Type, rect, u.Complete, cam)
 			continue
 		}
 		sx, sy := cam.ToScreen(pos)
@@ -388,10 +406,19 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		fill.Close()
 		stroke.Close()
 		if l := barrel(u.Type); l > 0 {
+			switch u.Type {
+			case faction.Bastion:
+				l += 0.9 * frac
+			case faction.Strider:
+				l += 0.5 * frac
+			}
 			x, y := at(geom.V(0.3, 0))
 			stroke.MoveTo(x, y)
 			x, y = at(geom.V(l, 0))
 			stroke.LineTo(x, y)
+		}
+		if frac > 0 {
+			rings = modeVisual(stroke, rings, u, frac, at, sx, sy, rad, scale, r.frame)
 		}
 		if u.Cargo > 0 {
 			cargo = append(cargo, u)
@@ -411,6 +438,70 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 	for _, u := range cargo {
 		pos, facing := DrawPos(u, v.Alpha)
 		drawCargo(em, v, u, pos, facing)
+	}
+	for _, g := range rings {
+		vector.StrokeCircle(em, g.x, g.y, g.r, g.w, scaleRGB(PlayerColor(g.owner, v.Player), g.a), true)
+	}
+}
+
+// liftHeight is how far (in tiles) packed buildings float.
+const liftHeight = 0.4
+
+// ring is an extra circle drawn around a unit in a SHIFT mode.
+type ring struct {
+	owner      sim.PlayerID
+	x, y, r, w float32
+	a          float64 // brightness
+}
+
+// modeVisual adds u's SHIFT-mode decorations, faded in by frac.
+func modeVisual(stroke *vector.Path, rings []ring, u *sim.Unit, frac float64, at func(geom.Vec) (float32, float32), sx, sy, rad, scale float64, frame int) []ring {
+	seg := func(a, b geom.Vec) {
+		x, y := at(a)
+		stroke.MoveTo(x, y)
+		x, y = at(b)
+		stroke.LineTo(x, y)
+	}
+	pulse := 0.5 + 0.5*math.Sin(float64(frame)*0.15+float64(u.ID))
+	switch u.Type {
+	case faction.Bastion:
+		// Outriggers swing out and brace.
+		for _, c := range [4]geom.Vec{{X: 0.5, Y: 0.6}, {X: 0.5, Y: -0.6}, {X: -0.5, Y: 0.6}, {X: -0.5, Y: -0.6}} {
+			d := geom.V(math.Copysign(0.35, c.X), math.Copysign(0.55, c.Y)).Scale(frac)
+			seg(c, c.Add(d))
+			e := c.Add(d)
+			seg(e.Add(geom.V(-0.15, 0)), e.Add(geom.V(0.15, 0)))
+		}
+	case faction.Strider:
+		// Plant spikes drive into the ground.
+		for i := range 3 {
+			sn, cs := math.Sincos(math.Pi/2 + float64(i)*2*math.Pi/3)
+			seg(geom.V(cs*0.6, sn*0.6), geom.V(cs*(0.6+0.6*frac), sn*(0.6+0.6*frac)))
+		}
+	case faction.Outrider:
+		// Boost exhaust.
+		l := (0.6 + 0.5*pulse) * frac
+		seg(geom.V(-0.8, 0.3), geom.V(-0.8-l, 0.3))
+		seg(geom.V(-0.8, -0.3), geom.V(-0.8-l, -0.3))
+	case faction.Trooper:
+		rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * (1.45 + 0.15*pulse)), 1.5, frac * (0.5 + 0.5*pulse)})
+	case faction.Mender:
+		seg(geom.V(0, -0.9), geom.V(0, -0.9-0.6*frac))
+		seg(geom.V(-0.25, -1.2-0.3*frac), geom.V(0.25, -1.2-0.3*frac))
+		if m := faction.Unit(u.Type).Shift; m != nil {
+			rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(m.AuraRange * scale * frac), 1.2, 0.25 + 0.15*pulse})
+		}
+	}
+	return rings
+}
+
+// thrusters draws jets under a packed building's corners.
+func thrusters(stroke *vector.Path, rect geom.Rect, frac float64, cam *Camera) {
+	l := 0.3 * frac
+	for _, x := range [2]float64{rect.Min.X + 0.3, rect.Max.X - 0.3} {
+		a := cam.ToScreenV(geom.V(x, rect.Max.Y))
+		b := cam.ToScreenV(geom.V(x, rect.Max.Y+l))
+		line(stroke, a, b)
 	}
 }
 

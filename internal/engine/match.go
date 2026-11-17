@@ -464,7 +464,26 @@ func (m *Match) press(b ui.Button) {
 		m.issue(sim.Command{Kind: sim.CmdHold, Units: own})
 	case ui.ActCancel:
 		m.issue(sim.Command{Kind: sim.CmdCancel, Units: own, Index: -1})
+	case ui.ActShift:
+		m.gearShift()
 	}
+}
+
+// gearShift toggles the SHIFT modes of the selection.
+func (m *Match) gearShift() {
+	var ids []sim.UnitID
+	for _, id := range m.own() {
+		if faction.Unit(m.world.Unit(id).Type).Shift != nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		if len(m.sel) > 0 {
+			m.say("Nothing selected can SHIFT")
+		}
+		return
+	}
+	m.issue(sim.Command{Kind: sim.CmdShift, Units: ids, Index: -1})
 }
 
 // resourceNear returns the resource node under world point p, with a
@@ -489,6 +508,12 @@ func (m *Match) resourceNear(p geom.Vec) *sim.Resource {
 func (m *Match) smartCommand(p geom.Vec, u *sim.Unit) {
 	own := m.own()
 	if len(own) == 0 {
+		return
+	}
+	if b := m.world.Unit(own[0]); b.Def.Building && b.Mode == 1 {
+		// Packed buildings fly where they're sent.
+		m.issue(sim.Command{Kind: sim.CmdMove, Units: own, Point: p, Queue: modifierHeld()})
+		m.pings = append(m.pings, ping{p, false})
 		return
 	}
 	rally := sim.Command{Kind: sim.CmdRally, Units: own, Point: p}
@@ -619,7 +644,7 @@ var digitKeys = [10]ebiten.Key{
 func (m *Match) updateKeys() {
 	pressed := inpututil.IsKeyJustPressed
 	if pressed(ebiten.KeyShiftLeft) || pressed(ebiten.KeyShiftRight) {
-		m.say("SHIFT: The Forge's gear-shift modes arrive in the next update")
+		m.gearShift()
 	}
 	if pressed(ebiten.KeySpace) && m.hasAlert {
 		m.cam.CenterOn(m.alert)

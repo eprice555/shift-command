@@ -138,3 +138,32 @@ func TestAIvsAIFinishes(t *testing.T) {
 		t.Fatalf("no winner after 25 min: %v vs %v", c0, c1)
 	}
 }
+
+func TestUsesShift(t *testing.T) {
+	w := sim.NewSkirmish()
+	a := New(w, 1)
+	at := along(a.exit, stagingDist+4)
+	tank := w.Spawn(1, faction.Bastion, at)
+	trooper := w.Spawn(1, faction.Trooper, at.Add(geom.V(0, 1)))
+	enemy := w.SpawnSquad(0, faction.Trooper, 2, along(a.exit, stagingDist+4+5))
+	sawOverdrive := false
+	for range 6 * sim.TicksPerSecond {
+		run(w, 1, a)
+		sawOverdrive = sawOverdrive || trooper.Mode == 1
+	}
+	if tank.Mode != 1 {
+		t.Errorf("Bastion did not siege with enemies %.1f away", tank.Pos.Dist(enemy[0].Pos))
+	}
+	if !sawOverdrive {
+		t.Error("Trooper never overdrove into the fight")
+	}
+	for _, e := range enemy {
+		if w.Unit(e.ID) != nil {
+			w.Unit(e.ID).HP = 0
+		}
+	}
+	run(w, 8*sim.TicksPerSecond, a)
+	if tank.Mode != 0 {
+		t.Error("Bastion stayed sieged with no enemies left")
+	}
+}

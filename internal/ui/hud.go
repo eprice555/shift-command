@@ -245,7 +245,33 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 	}
 }
 
+// unitState describes what u is doing, led by its SHIFT mode.
 func unitState(u *sim.Unit) string {
+	m := faction.Unit(u.Type).Shift
+	switch {
+	case m == nil:
+	case u.Shifting() && u.Def.Building && u.Mode == 1:
+		return "PACKING UP..."
+	case u.Shifting() && u.Def.Building:
+		return "LANDING..."
+	case u.Shifting() && u.Mode == 1:
+		return "SHIFTING TO " + strings.ToUpper(m.Name) + "..."
+	case u.Shifting():
+		return "SHIFTING TO " + strings.ToUpper(m.Base) + "..."
+	case u.Def.Building && u.Mode == 1:
+		if len(u.Orders) > 0 {
+			return "PACKED · FLYING"
+		}
+		return "PACKED · SHIFT TO LAND"
+	case u.Mode == 1 && m.Timed():
+		return fmt.Sprintf("%s %.0fs · %s", strings.ToUpper(m.Name), math.Ceil(u.ModeLeft()), baseState(u))
+	case u.Mode == 1:
+		return strings.ToUpper(m.Name) + " · " + baseState(u)
+	}
+	return baseState(u)
+}
+
+func baseState(u *sim.Unit) string {
 	if u.Def.Building {
 		switch {
 		case !u.Complete:
@@ -363,6 +389,18 @@ func (r *Renderer) drawTooltip(screen *ebiten.Image, bt Button, card geom.Rect) 
 	case ActHold:
 		add("HOLD POSITION  [H]", colText)
 		add("Fire at enemies in range, never move", colDim)
+	case ActShift:
+		if bt.Mixed {
+			add("GEAR SHIFT  [SHIFT]", colText)
+			add("Switch every selected unit type's mode", colDim)
+			break
+		}
+		d := faction.Unit(bt.Type)
+		add(fmt.Sprintf("%s: %s / %s  [SHIFT]", strings.ToUpper(d.Name), strings.ToUpper(d.Shift.Base), strings.ToUpper(d.Shift.Name)), colText)
+		add(d.Shift.Desc, colDim)
+		if d.Shift.Time > 0 {
+			add(fmt.Sprintf("Takes %gs to switch", d.Shift.Time), colDim)
+		}
 	case ActCancel:
 		add("CANCEL  [ESC]", colText)
 		add("Cancel construction or the last queued unit", colDim)
@@ -561,7 +599,7 @@ var helpLines = [][2]string{
 	{"WHEEL", "zoom"},
 	{"MINIMAP", "left: jump · right: move"},
 	{"SPACE", "jump to the last attack alert"},
-	{"SHIFT", "faction SHIFT (next update)"},
+	{"SHIFT", "gear shift: switch the selection's modes"},
 	{"F2 / F3  ·  F4", "debug spawn  ·  toggle fog"},
 }
 

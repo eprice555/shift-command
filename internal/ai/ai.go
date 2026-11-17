@@ -36,7 +36,9 @@ type AI struct {
 	scouts      []geom.Vec
 	scout       int
 	defendAt    geom.Vec
-	expander    sim.UnitID // worker walking to an unexplored expansion
+	expander    sim.UnitID            // worker walking to an unexplored expansion
+	lastShift   map[sim.UnitID]uint64 // tick of each unit's last SHIFT toggle
+	siegeOK     uint64                // no sieging before this tick
 
 	s   snapshot
 	out []sim.Command

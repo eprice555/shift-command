@@ -90,3 +90,41 @@ func TestTechTree(t *testing.T) {
 		t.Errorf("Foundry requires %v", r)
 	}
 }
+
+func TestForgeShiftModes(t *testing.T) {
+	for _, d := range Units() {
+		if d.Faction != Forge {
+			continue
+		}
+		hasMode := d.Shift != nil
+		wantMode := !d.Building && !d.Worker || d.Type == CommandHub || d.Type == DrillYard || d.Type == Foundry
+		if hasMode != wantMode {
+			t.Errorf("%s: has SHIFT mode %v, want %v", d.Name, hasMode, wantMode)
+		}
+		if !hasMode && d.Shifted().Speed != d.Speed {
+			t.Errorf("%s: Shifted() changed a unit without a mode", d.Name)
+		}
+	}
+	art := Unit(Bastion).Shifted()
+	if art.Speed != 0 || art.Weapon.Range != 13 || art.Weapon.Splash == 0 || art.Weapon.MinRange == 0 {
+		t.Errorf("artillery: %+v speed %.1f", art.Weapon, art.Speed)
+	}
+	if Unit(Bastion).Weapon.Range != 7 {
+		t.Error("Shifted() mutated the base def")
+	}
+	if p := Unit(Strider).Shifted(); p.Weapon.Range != Unit(Strider).Weapon.Range+3 || p.Speed != 0 {
+		t.Errorf("planted strider: range %.0f speed %.1f", p.Weapon.Range, p.Speed)
+	}
+	if o := Unit(Trooper).Shifted(); o.Speed != Unit(Trooper).Speed*1.5 || o.Weapon.Cooldown >= Unit(Trooper).Weapon.Cooldown {
+		t.Errorf("overdrive: speed %.2f cooldown %.2f", o.Speed, o.Weapon.Cooldown)
+	}
+	if b := Unit(Outrider).Shifted(); b.Armed() || b.Speed != 2*Unit(Outrider).Speed {
+		t.Errorf("boost: armed %v speed %.1f", b.Armed(), b.Speed)
+	}
+	if m := Unit(Mender).Shifted(); !m.HealAura || m.Speed != 0 {
+		t.Error("field post should be an immobile heal aura")
+	}
+	if h := Unit(CommandHub).Shifted(); h.Speed == 0 || h.DropOff || len(h.Trains) != 0 || h.SupplyProvided == 0 {
+		t.Errorf("packed hub: speed %.1f dropoff %v trains %v supply %.0f", h.Speed, h.DropOff, h.Trains, h.SupplyProvided)
+	}
+}

@@ -33,6 +33,8 @@ const (
 	EvUnitReady                     // a unit finished training at From
 	EvBuildingDone                  // a building finished construction at From
 	EvHeal                          // a healer pulsed: From → To
+	EvShift                         // a unit switched SHIFT mode at From
+	EvAura                          // a heal aura pulsed at From (radius Splash)
 )
 
 // Event is something that happened during a tick. The sim never reads its
@@ -45,6 +47,7 @@ type Event struct {
 	To     geom.Vec
 	Attack faction.AttackType
 	Notice Notice
+	Splash float64 // shots: splash radius at To; auras: radius
 }
 
 // Ghost is a player's memory of an enemy building last seen in the fog.
@@ -185,8 +188,11 @@ func (w *World) Step(cmds []Command) {
 		v := w.vel[i]
 		u.Pos = u.Pos.Add(v)
 		u.Moving = v != (geom.Vec{})
-		if u.Moving && u.target == 0 {
+		if u.Moving && u.target == 0 && !u.Def.Building {
 			u.Facing = v.Angle()
+		}
+		if u.lifted {
+			u.syncTiles()
 		}
 	}
 	w.separate()
@@ -225,7 +231,7 @@ func (w *World) removeDead() {
 			continue
 		}
 		delete(w.byID, u.ID)
-		if u.Def.Building {
+		if u.Def.Building && !u.lifted {
 			w.Map.Occupy(u.TileX, u.TileY, u.Def.Size, -1)
 		}
 		w.Events = append(w.Events, Event{Kind: EvDeath, Owner: u.Owner, Type: u.Type, From: u.Pos})
