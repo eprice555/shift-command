@@ -37,6 +37,10 @@ type Options struct {
 	// Demo selects the player's army and attack-moves it into the enemy
 	// forward squad (implies StartMatch).
 	Demo bool
+	// SkipSeconds fast-forwards a new match by this much game time.
+	SkipSeconds int
+	// Reveal starts the match with fog of war off.
+	Reveal bool
 }
 
 // Game implements ebiten.Game.
@@ -70,6 +74,8 @@ func (g *Game) startMatch() {
 		m.showHelp, m.follow = false, true
 		m.commandAt(geom.V(46, 34), nil, true)
 	}
+	g.match.revealAll = g.opts.Reveal
+	g.match.fastForward(g.opts.SkipSeconds * sim.TicksPerSecond)
 }
 
 func (g *Game) Update() error {

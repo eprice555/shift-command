@@ -477,6 +477,9 @@ func (r *Renderer) drawGroups(screen *ebiten.Image, v *MatchView, panel geom.Rec
 	}
 }
 
+// alertShow is how long (updates) an attack alert pulses on the minimap.
+const alertShow = 5 * 60
+
 func (r *Renderer) drawMinimap(screen *ebiten.Image, v *MatchView, mm geom.Rect) {
 	c := &r.match
 	m := v.World.Map
@@ -525,6 +528,15 @@ func (r *Renderer) drawMinimap(screen *ebiten.Image, v *MatchView, mm geom.Rect)
 		px, py := mm.Min.X+u.Pos.X*sx, mm.Min.Y+u.Pos.Y*sy
 		vector.FillRect(screen, float32(px-1.5), float32(py-1.5), 3, 3, col, false)
 	}
+	if v.HasAlert && v.AlertAge < alertShow {
+		// Shrinking red rings mark the attack on the minimap.
+		px, py := mm.Min.X+v.Alert.X*sx, mm.Min.Y+v.Alert.Y*sy
+		ph := float64(v.AlertAge%40) / 40
+		for i := range 2 {
+			rad := 4 + 14*(1-math.Mod(ph+float64(i)*0.5, 1))
+			vector.StrokeCircle(screen, float32(px), float32(py), float32(rad), 1.5, colEnemy, true)
+		}
+	}
 	vis := v.Cam.Visible()
 	x0 := max(vis.Min.X, 0)*sx + mm.Min.X
 	y0 := max(vis.Min.Y, 0)*sy + mm.Min.Y
@@ -548,6 +560,7 @@ var helpLines = [][2]string{
 	{"ARROWS / MIDDLE-DRAG", "scroll camera"},
 	{"WHEEL", "zoom"},
 	{"MINIMAP", "left: jump · right: move"},
+	{"SPACE", "jump to the last attack alert"},
 	{"SHIFT", "faction SHIFT (next update)"},
 	{"F2 / F3  ·  F4", "debug spawn  ·  toggle fog"},
 }

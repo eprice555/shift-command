@@ -51,6 +51,11 @@ type MatchView struct {
 	// Message is a transient notice; MessageAge counts updates since it was set.
 	Message    string
 	MessageAge int
+	// Alert is where the enemy last attacked off-screen; AlertAge counts
+	// updates since.
+	HasAlert bool
+	Alert    geom.Vec
+	AlertAge int
 	// Groups holds the live unit count of each control group 0–9.
 	Groups [10]int
 

@@ -14,7 +14,8 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 
 - **M0 (skeleton)**: window, neon renderer with a glow pass, fixed 20 ticks/s simulation, and CI that builds the WASM version and deploys it to GitHub Pages on every push to `main`.
 - **M1 (RTS core)**: a sandbox skirmish on the map *Neon Crossing*. Both sides get a mixed squad of Forge units (Trooper, Outrider, Strider), and the enemy has a forward group to fight. It includes a camera with pan and zoom, a minimap, box/click/double-click selection, control groups, A* pathfinding and flow fields for group moves, separation steering, combat with attack/armor bonuses, and fog of war. That sandbox is still available with `-demo`.
-- **M2a (economy, base building, production)**: the match is now a real skirmish. Each side starts with a Command Hub and 6 Riggers. Riggers mine Crystals on their own; you build Generators (supply), Extractors on flux vents (Flux), a Drill Yard and a Foundry, then train Troopers, Outriders, Menders, Striders and Bastions. Destroy every enemy building to win. The enemy has a working economy but **no AI yet** (next update), Forge SHIFT modes come after that, and all stats are placeholders.
+- **M2a (economy, base building, production)**: the match is now a real skirmish. Each side starts with a Command Hub and 6 Riggers. Riggers mine Crystals on their own; you build Generators (supply), Extractors on flux vents (Flux), a Drill Yard and a Foundry, then train Troopers, Outriders, Menders, Striders and Bastions. Destroy every enemy building to win. All stats are placeholders.
+- **M2b (enemy AI)**: the enemy Forge now plays. It follows a data-driven build order, mines and takes Flux, adds production, expands to its natural at around 4 minutes, and keeps its supply ahead. It defends its base, gathers an army at a staging point, attacks when the wave is big enough (each wave is bigger than the last), and retreats when a fight turns against it. It scouts expansions to find your buildings. There is one difficulty for now (Easy/Normal/Hard come in M5) and it does not use SHIFT yet. When the enemy hits something of yours off-screen, you get an **Under attack!** message and a red ping on the minimap; press **Space** to jump there. Forge SHIFT modes are next.
 
 The title screen still has the M0 demo: press **Shift** to morph between the faction emblems, then press **Enter** or click to deploy.
 
@@ -24,7 +25,7 @@ The title screen still has the M0 demo: press **Shift** to morph between the fac
 2. Select a Rigger and use the command card (**Q W E R T**) to build: Command Hub, Generator (+8 supply), Extractor (on a purple flux vent), Drill Yard, Foundry. Click to place; **Esc** or right click cancels.
 3. Build an Extractor and send 3 Riggers to it (right click the vent) to collect Flux.
 4. Select a Drill Yard or Foundry and train an army. Right click the ground with the building selected to set its rally point.
-5. Attack-move into the enemy base and destroy every enemy building.
+5. The enemy builds up and attacks with waves that grow over time, so build a defense first. Then attack-move into the enemy base and destroy every enemy building.
 
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 
@@ -45,7 +46,8 @@ The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-ca
 | **Arrow keys**, **middle-drag** | Scroll the camera (screen-edge scrolling is native-only) |
 | **Mouse wheel** | Zoom |
 | **Minimap** | Left click/drag: jump camera; right click: move |
-| **Shift** | Faction SHIFT ability (Forge modes arrive after the AI update) |
+| **Space** | Jump the camera to the last "Under attack!" alert |
+| **Shift** | Faction SHIFT ability (Forge modes arrive in the next update) |
 | **Esc** | Cancel placement or targeting, then cancel the last queued unit / construction, then deselect |
 | **Click a queue slot** | Cancel that queued unit (refunded) |
 | **F1** | Toggle the controls panel |
@@ -81,6 +83,7 @@ go run ./cmd/game -updates 120 -screenshot shot.png   # run 2s, save the last fr
 go run ./cmd/game -autoshift 20                       # title screen: press Shift every 20 updates
 go run ./cmd/game -match                              # skip the title, start the skirmish
 go run ./cmd/game -demo -updates 640 -screenshot fight.png   # M1 sandbox: army attack-moves into the enemy
+go run ./cmd/game -match -skip 200 -reveal                    # fast-forward 200s of AI play, fog off
 ```
 
 ## Layout
@@ -94,7 +97,7 @@ internal/geom/     2D vector/rect math shared by sim, world, and ui
 internal/ui/       neon renderer, glow pass, camera, effects, HUD, minimap
 internal/assets/   code-generated/embedded resources (fonts; synthesized audio later)
 internal/world/    tile grid, map, fog of war, A* and flow-field pathfinding
-internal/ai/       AI opponent (M2)
+internal/ai/       AI opponent: build order, economy, army control
 web/               index.html for the WASM build
 scripts/           build scripts
 docs/GDD.md        game design document
