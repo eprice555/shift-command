@@ -31,10 +31,16 @@ func TestTitleShiftMorphsAndCycles(t *testing.T) {
 	if ti.Morphing() {
 		t.Fatal("still morphing")
 	}
-	for range faction.Count - 1 {
+	playable := 0
+	for id := range faction.Count {
+		if faction.Get(id).Playable {
+			playable++
+		}
+	}
+	for range playable - 1 {
 		ti.Update(true)
 	}
-	if ti.Form != faction.Forge || ti.Shifts != int(faction.Count) {
+	if ti.Form != faction.Forge || ti.Shifts != playable {
 		t.Fatalf("after full cycle: %+v", ti)
 	}
 }

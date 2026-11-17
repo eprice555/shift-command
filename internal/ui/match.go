@@ -69,12 +69,13 @@ type MatchView struct {
 	PlaceNotice    sim.Notice
 }
 
-// PlayerColor returns the draw color for units owned by p, seen by viewer.
-func PlayerColor(p, viewer sim.PlayerID) color.RGBA {
+// PlayerColor returns the draw color for units owned by p in w, seen by
+// viewer: their faction's color, or the enemy red.
+func PlayerColor(w *sim.World, p, viewer sim.PlayerID) color.RGBA {
 	if p != viewer {
 		return colEnemy
 	}
-	return faction.Get(faction.Forge).Color
+	return faction.Get(w.Players[p].Faction).Color
 }
 
 type seg struct{ a, b geom.Vec }
@@ -86,6 +87,8 @@ type matchCache struct {
 	miniWall *ebiten.Image
 	fog      *ebiten.Image
 	fogPix   []byte
+	creep    *ebiten.Image
+	creepPix []byte
 
 	fill, stroke [sim.NumPlayers]vector.Path
 	scratch      vector.Path
@@ -99,6 +102,8 @@ func (c *matchCache) ensure(m *world.Map) {
 	c.edges = wallEdges(m.Grid)
 	c.fog = ebiten.NewImage(m.W, m.H)
 	c.fogPix = make([]byte, 4*m.W*m.H)
+	c.creep = ebiten.NewImage(m.W, m.H)
+	c.creepPix = make([]byte, 4*m.W*m.H)
 	pix := make([]byte, 4*m.W*m.H)
 	for y := range m.H {
 		for x := range m.W {
@@ -191,6 +196,7 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 
 	screen.Fill(colBackground)
 	r.drawFloor(screen, cam, vis)
+	r.drawCreep(screen, v)
 
 	// Walls: dark fill on screen, glowing outline in the emissive layer.
 	em := r.bloom.src
@@ -253,7 +259,7 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 
 	// Tube cores on top of the glow.
 	for p := range sim.PlayerID(sim.NumPlayers) {
-		col := Whiten(PlayerColor(p, v.Player), 0.6)
+		col := Whiten(PlayerColor(v.World, p, v.Player), 0.6)
 		sop := &vector.StrokeOptions{Width: float32(max(0.8, cam.Zoom)), LineJoin: vector.LineJoinRound}
 		dop := &vector.DrawPathOptions{AntiAlias: true}
 		dop.ColorScale.ScaleWithColor(col)
@@ -309,6 +315,9 @@ func (r *Renderer) drawFloor(screen *ebiten.Image, cam *Camera, vis geom.Rect) {
 
 // unitShape appends u's outline (unit radius 1, facing +X) to dst.
 func unitShape(dst []geom.Vec, t faction.UnitType) []geom.Vec {
+	if isBrood(t) {
+		return broodShape(dst, t)
+	}
 	switch t {
 	case faction.Outrider:
 		return append(dst, geom.V(1.1, 0), geom.V(-0.85, 0.8), geom.V(-0.35, 0), geom.V(-0.85, -0.8))
@@ -383,7 +392,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 				rect = geom.Rect{Min: rect.Min.Add(lift), Max: rect.Max.Add(lift)}
 				thrusters(stroke, rect, frac, cam)
 			}
-			buildingOutline(fill, stroke, u.Type, rect, u.Complete, cam)
+			buildingOutline(fill, stroke, u.Type, rect, u.Complete, u.BuildFrac(), float64(r.frame)*0.06+float64(u.ID), cam)
 			continue
 		}
 		sx, sy := cam.ToScreen(pos)
@@ -392,8 +401,16 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		at := func(q geom.Vec) (float32, float32) {
 			return float32(sx + (q.X*cos-q.Y*sin)*rad), float32(sy + (q.X*sin+q.Y*cos)*rad)
 		}
-		pts = unitShape(pts[:0], u.Type)
+		brood := u.Def.Faction == faction.Brood
+		if u.Morphing() {
+			pts = cocoon(pts[:0], u.MorphFrac())
+		} else {
+			pts = unitShape(pts[:0], u.Type)
+		}
 		for i, q := range pts {
+			if brood {
+				q = wobble(q, i, u.ID, r.frame, 0.06)
+			}
 			x, y := at(q)
 			if i == 0 {
 				fill.MoveTo(x, y)
@@ -425,7 +442,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		}
 	}
 	for p := range sim.PlayerID(sim.NumPlayers) {
-		col := PlayerColor(p, v.Player)
+		col := PlayerColor(v.World, p, v.Player)
 		dop := &vector.DrawPathOptions{AntiAlias: true}
 		dop.ColorScale.ScaleWithColor(scaleRGB(col, 0.16))
 		vector.FillPath(screen, &c.fill[p], nil, dop)
@@ -440,7 +457,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		drawCargo(em, v, u, pos, facing)
 	}
 	for _, g := range rings {
-		vector.StrokeCircle(em, g.x, g.y, g.r, g.w, scaleRGB(PlayerColor(g.owner, v.Player), g.a), true)
+		vector.StrokeCircle(em, g.x, g.y, g.r, g.w, scaleRGB(PlayerColor(v.World, g.owner, v.Player), g.a), true)
 	}
 }
 

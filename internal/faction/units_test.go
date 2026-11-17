@@ -43,6 +43,13 @@ func TestUnitDefsSane(t *testing.T) {
 		if d.Type != UnitType(i) {
 			t.Errorf("%s: Type %d at index %d", d.Name, d.Type, i)
 		}
+		if d.Morphs {
+			// Spawn: free, immobile larva hatched by the Hive.
+			if d.Crystals != 0 || d.Supply != 0 || d.Speed != 0 || len(d.Trains) == 0 {
+				t.Errorf("%s: bad morpher stats %+v", d.Name, d)
+			}
+			continue
+		}
 		if d.Name == "" || d.HP <= 0 || d.Radius <= 0 || d.Sight <= 0 || d.BuildTime <= 0 || d.Crystals <= 0 {
 			t.Errorf("%s: bad stats %+v", d.Name, d)
 		}
@@ -88,6 +95,53 @@ func TestTechTree(t *testing.T) {
 	}
 	if r := Unit(Foundry).Requires; len(r) != 1 || r[0] != DrillYard {
 		t.Errorf("Foundry requires %v", r)
+	}
+}
+
+func TestBroodTechTree(t *testing.T) {
+	got := Buildable(Brood)
+	want := []UnitType{Hive, NestPod, BroodExtractor, SpawningPit, GestationDen}
+	if len(got) != len(want) {
+		t.Fatalf("Buildable = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Buildable = %v, want %v", got, want)
+		}
+	}
+	for _, f := range Unit(Spawn).Trains {
+		d := Unit(f)
+		if d.Faction != Brood || d.Building {
+			t.Errorf("Spawn morphs into %s", d.Name)
+		}
+		if b, _ := TrainedAt(f); b != Hive {
+			t.Errorf("%s trained at %v, want Hive", d.Name, b)
+		}
+	}
+	for _, d := range Units() {
+		if d.Faction != Brood {
+			continue
+		}
+		if d.Regen <= 0 {
+			t.Errorf("%s: Brood without regen", d.Name)
+		}
+		if d.Building && (!d.SelfBuild || d.NeedsCreep == (d.Type == Hive || d.OnVent)) {
+			t.Errorf("%s: SelfBuild %v NeedsCreep %v", d.Name, d.SelfBuild, d.NeedsCreep)
+		}
+	}
+	if QueueSupply(Biter) != 1 || Unit(Biter).Yield() != 2 {
+		t.Errorf("Biter pair supply %v yield %d", QueueSupply(Biter), Unit(Biter).Yield())
+	}
+	for _, f := range All() {
+		if !f.Playable {
+			continue
+		}
+		if Unit(f.HQ).Faction != f.ID || !Unit(f.Worker).Worker || Unit(f.Supply).SupplyProvided <= 0 || !Unit(f.Extractor).OnVent {
+			t.Errorf("%s: bad key types", f.Name)
+		}
+	}
+	if Forge.NextPlayable() != Brood || Brood.NextPlayable() != Forge {
+		t.Error("NextPlayable should cycle Forge <-> Brood")
 	}
 }
 

@@ -18,14 +18,15 @@ func NewTitle() *Title {
 	return &Title{MorphTick: TitleMorphUpdates}
 }
 
-// Update advances one update; shift starts a morph to the next faction.
+// Update advances one update; shift starts a morph to the next playable
+// faction, which is the one the player deploys as.
 func (t *Title) Update(shift bool) {
 	if t.MorphTick < TitleMorphUpdates {
 		t.MorphTick++
 	}
 	if shift {
 		t.PrevForm = t.Form
-		t.Form = t.Form.Next()
+		t.Form = t.Form.NextPlayable()
 		t.MorphTick = 0
 		t.Shifts++
 	}

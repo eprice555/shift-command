@@ -84,8 +84,9 @@ type Match struct {
 
 // NewMatch starts a skirmish (or the M1 combat sandbox) with the camera on
 // the player's start.
-func NewMatch(sandbox bool) *Match {
-	w := sim.NewSkirmish()
+func NewMatch(sandbox bool, f faction.ID) *Match {
+	// The AI plays the Forge until it learns the other factions (M5).
+	w := sim.NewSkirmishFor([sim.NumPlayers]faction.ID{f, faction.Forge})
 	if sandbox {
 		w = sim.NewSandbox()
 	}
@@ -226,8 +227,11 @@ func (m *Match) Update() {
 		for _, ev := range m.world.Events {
 			if ev.Kind == sim.EvNotice && ev.Owner == m.player {
 				msg := ev.Notice.String()
-				if ev.Notice == sim.NoticeRequires {
+				switch ev.Notice {
+				case sim.NoticeRequires:
 					msg += " " + faction.Unit(ev.Type).Name
+				case sim.NoticeSupply:
+					msg += ": build a " + faction.Unit(ev.Type).Name
 				}
 				m.say(msg)
 			}
@@ -478,7 +482,11 @@ func (m *Match) gearShift() {
 		}
 	}
 	if len(ids) == 0 {
-		if len(m.sel) > 0 {
+		switch {
+		case len(m.sel) == 0:
+		case m.world.Players[m.player].Faction == faction.Brood:
+			m.say("Brood SHIFT abilities (Burrow, Pounce, Root...) arrive in M3b")
+		default:
 			m.say("Nothing selected can SHIFT")
 		}
 		return
@@ -608,9 +616,20 @@ func (m *Match) finishSelect() {
 			ids = append(ids, u.ID)
 		}
 	}
-	// Like classic RTSes, a box with any units in it ignores buildings.
-	if slices.ContainsFunc(ids, func(id sim.UnitID) bool { return !m.world.Unit(id).Def.Building }) {
-		ids = slices.DeleteFunc(ids, func(id sim.UnitID) bool { return m.world.Unit(id).Def.Building })
+	// Like classic RTSes, a box keeps only its most army-like units: units
+	// over Spawn (and cocoons), and those over buildings.
+	tier := func(id sim.UnitID) int {
+		switch d := m.world.Unit(id).Def; {
+		case d.Building:
+			return 2
+		case d.Morphs:
+			return 1
+		}
+		return 0
+	}
+	if len(ids) > 0 {
+		best := tier(slices.MinFunc(ids, func(a, b sim.UnitID) int { return tier(a) - tier(b) }))
+		ids = slices.DeleteFunc(ids, func(id sim.UnitID) bool { return tier(id) != best })
 	}
 	if add {
 		m.addSelection(ids)

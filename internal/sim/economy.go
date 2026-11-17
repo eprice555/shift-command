@@ -28,6 +28,7 @@ const (
 
 // Player is one side's economy.
 type Player struct {
+	Faction        faction.ID
 	Crystals, Flux int
 	// Supply is used plus reserved (queued) supply; SupplyCap is what
 	// completed buildings provide, capped at faction.MaxSupply.
@@ -261,7 +262,7 @@ func (w *World) recount() {
 		p := &w.Players[u.Owner]
 		p.Supply += u.Def.Supply
 		for _, t := range u.Queue {
-			p.Supply += faction.Unit(t).Supply
+			p.Supply += faction.QueueSupply(t)
 		}
 		if u.Complete {
 			p.SupplyCap += u.Def.SupplyProvided

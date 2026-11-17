@@ -167,3 +167,11 @@ func TestUsesShift(t *testing.T) {
 		t.Error("Bastion stayed sieged with no enemies left")
 	}
 }
+
+func TestForgeAIvsBrood(t *testing.T) {
+	w := sim.NewSkirmishFor([sim.NumPlayers]faction.ID{faction.Brood, faction.Forge})
+	checkNotices(t, run(w, 12*minute, New(w, 1)))
+	if !w.Over || w.Winner != 1 {
+		t.Fatalf("after %d s: over %v winner %d", w.Tick/sim.TicksPerSecond, w.Over, w.Winner)
+	}
+}

@@ -92,6 +92,11 @@ type Unit struct {
 	shiftTotal int  // length of the current switch
 	modeLeft   int  // ticks left on a timed mode
 	lifted     bool // packed building in the air
+
+	home     UnitID  // Spawn: the Hive that hatched it
+	hatch    int     // Hive: ticks toward the next Spawn
+	creepR   float64 // creep radius spread so far
+	consumed bool    // Drone that became a building: removed without a death
 }
 
 // Target returns the unit this one is currently fighting, or 0.
@@ -173,9 +178,22 @@ func (w *World) think(u *Unit) geom.Vec {
 		if u.lifted {
 			return w.fly(u)
 		}
+		if !u.Complete && u.Def.SelfBuild {
+			w.grow(u)
+		}
 		if u.Mode == 0 {
 			w.produce(u)
 		}
+		if u.Complete && u.Def.SpawnMax > 0 {
+			w.hatchSpawn(u)
+		}
+		return geom.Vec{}
+	}
+	if u.consumed {
+		return geom.Vec{}
+	}
+	if u.Morphing() {
+		w.morph(u)
 		return geom.Vec{}
 	}
 
