@@ -25,7 +25,7 @@ The title screen still uses the M0 emblem morph to show the selected faction.
 
 1. Your Riggers start mining. Select the **Command Hub** and press **Q** to train more Riggers.
 2. Select a Rigger and use the command card (**Q W E R T**) to build: Command Hub, Generator (+8 supply), Extractor (on a purple flux vent), Drill Yard, Foundry. Click to place; **Esc** or right click cancels.
-3. Build an Extractor and send 3 Riggers to it (right click the vent) to collect Flux.
+3. Build an Extractor and send 3 Riggers to it (select them and right click the Extractor) to collect Flux.
 4. Select a Drill Yard or Foundry and train an army. Right click the ground with the building selected to set its rally point.
 5. The enemy builds up and attacks with waves that grow over time, so build a defense first. Then attack-move into the enemy base and destroy every enemy building.
 

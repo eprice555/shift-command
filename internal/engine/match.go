@@ -524,8 +524,14 @@ func (m *Match) smartCommand(p geom.Vec, u *sim.Unit) {
 		m.pings = append(m.pings, ping{p, false})
 		return
 	}
-	rally := sim.Command{Kind: sim.CmdRally, Units: own, Point: p}
 	res := m.resourceNear(p)
+	// Your finished extractor covers its vent: clicking it means the vent.
+	if u != nil && u.Owner == m.player && u.Complete {
+		if v := m.world.VentOf(u); v != nil {
+			u, res = nil, v
+		}
+	}
+	rally := sim.Command{Kind: sim.CmdRally, Units: own, Point: p}
 	if u == nil && res != nil {
 		rally.Res = res.ID
 	}

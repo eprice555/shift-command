@@ -123,6 +123,17 @@ func (w *World) Missing(p PlayerID, t faction.UnitType) (faction.UnitType, bool)
 }
 
 // ventAt returns the flux vent whose footprint starts at (x, y), or nil.
+// VentOf returns the flux vent under extractor b, or nil.
+func (w *World) VentOf(b *Unit) *Resource {
+	if b == nil || !b.Def.OnVent {
+		return nil
+	}
+	if v := w.ventAt(b.TileX, b.TileY); v != nil && v.Extractor == b.ID {
+		return v
+	}
+	return nil
+}
+
 func (w *World) ventAt(x, y int) *Resource {
 	for _, r := range w.Resources {
 		if r.Kind == world.Flux && r.X == x && r.Y == y {
