@@ -284,7 +284,15 @@ func unitState(u *sim.Unit) string {
 	}
 	m := faction.Unit(u.Type).Shift
 	switch {
+	case u.LifeLeft() > 0:
+		return fmt.Sprintf("FADES IN %.0fs · %s", math.Ceil(u.LifeLeft()), baseState(u))
 	case m == nil:
+	case u.Leaping():
+		return "POUNCING!"
+	case m.Cast() && u.CastLeft() > 0:
+		return fmt.Sprintf("%s IN %.0fs · %s", strings.ToUpper(m.Name), math.Ceil(u.CastLeft()), baseState(u))
+	case m.Cast():
+		return strings.ToUpper(m.Name) + " READY · " + baseState(u)
 	case u.Shifting() && u.Def.Building && u.Mode == 1:
 		return "PACKING UP..."
 	case u.Shifting() && u.Def.Building:
@@ -393,6 +401,16 @@ func (r *Renderer) drawCard(screen *ebiten.Image, v *MatchView, card geom.Rect) 
 			}
 			drawCentered(screen, costText(faction.Unit(bt.Type)), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
 		}
+		if bt.Kind == ActMorph && (bt.Enabled || bt.Crystals+bt.Flux > 0) {
+			c := colCrystal
+			if !bt.Enabled {
+				c = colDim
+			}
+			drawCentered(screen, costText(faction.UnitDef{Crystals: bt.Crystals, Flux: bt.Flux}), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
+		}
+		if bt.Cooldown > 0 {
+			drawCentered(screen, fmt.Sprintf("%.0fs", math.Ceil(bt.Cooldown)), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, colDim)
+		}
 	}
 	if hover != nil {
 		r.drawTooltip(screen, *hover, card)
@@ -434,10 +452,30 @@ func (r *Renderer) drawTooltip(screen *ebiten.Image, bt Button, card geom.Rect) 
 			break
 		}
 		d := faction.Unit(bt.Type)
-		add(fmt.Sprintf("%s: %s / %s  [SHIFT]", strings.ToUpper(d.Name), strings.ToUpper(d.Shift.Base), strings.ToUpper(d.Shift.Name)), colText)
+		if d.Shift.Cast() {
+			add(fmt.Sprintf("%s: %s  [SHIFT]", strings.ToUpper(d.Name), strings.ToUpper(d.Shift.Name)), colText)
+		} else {
+			add(fmt.Sprintf("%s: %s / %s  [SHIFT]", strings.ToUpper(d.Name), strings.ToUpper(d.Shift.Base), strings.ToUpper(d.Shift.Name)), colText)
+		}
 		add(d.Shift.Desc, colDim)
 		if d.Shift.Time > 0 {
 			add(fmt.Sprintf("Takes %gs to switch", d.Shift.Time), colDim)
+		}
+		if bt.Cooldown > 0 {
+			add(fmt.Sprintf("Ready in %.0fs", math.Ceil(bt.Cooldown)), colBad)
+		}
+	case ActMorph:
+		d := faction.Unit(bt.Type)
+		add(fmt.Sprintf("RE-MORPH INTO %s  [%s]", strings.ToUpper(d.Name), bt.Key), colText)
+		cost := fmt.Sprintf("%d crystals", bt.Crystals)
+		if bt.Flux > 0 {
+			cost += fmt.Sprintf(" · %d flux", bt.Flux)
+		}
+		add(fmt.Sprintf("%s · %gs", cost, d.BuildTime/2), colCrystal)
+		add("One selected unit cocoons and hatches as a "+d.Name, colDim)
+		add("Pays the difference in value; cheaper forms are free", colDim)
+		if bt.Reason != "" {
+			add(bt.Reason, colBad)
 		}
 	case ActCancel:
 		add("CANCEL  [ESC]", colText)
@@ -637,7 +675,7 @@ var helpLines = [][2]string{
 	{"WHEEL", "zoom"},
 	{"MINIMAP", "left: jump · right: move"},
 	{"SPACE", "jump to the last attack alert"},
-	{"SHIFT", "gear shift: switch the selection's modes"},
+	{"SHIFT", "faction ability: switch modes · cast"},
 	{"F2 / F3  ·  F4", "debug spawn  ·  toggle fog"},
 }
 

@@ -470,6 +470,12 @@ func (m *Match) press(b ui.Button) {
 		m.issue(sim.Command{Kind: sim.CmdCancel, Units: own, Index: -1})
 	case ui.ActShift:
 		m.gearShift()
+	case ui.ActMorph:
+		if !b.Enabled {
+			m.say(b.Reason)
+			return
+		}
+		m.issue(sim.Command{Kind: sim.CmdMorph, Units: own, Type: b.Type})
 	}
 }
 
@@ -482,11 +488,7 @@ func (m *Match) gearShift() {
 		}
 	}
 	if len(ids) == 0 {
-		switch {
-		case len(m.sel) == 0:
-		case m.world.Players[m.player].Faction == faction.Brood:
-			m.say("Brood SHIFT abilities (Burrow, Pounce, Root...) arrive in M3b")
-		default:
+		if len(m.sel) > 0 {
 			m.say("Nothing selected can SHIFT")
 		}
 		return
@@ -724,23 +726,34 @@ func (m *Match) updateKeys() {
 		m.showHelp = !m.showHelp
 	}
 	if pressed(ebiten.KeyF2) || pressed(ebiten.KeyF3) {
-		types := [...]faction.UnitType{faction.Trooper, faction.Outrider, faction.Strider}
-		counts := [...]int{6, 4, 3}
-		i := m.spawnCycle % len(types)
-		m.spawnCycle++
 		owner, who := m.player, "Spawned"
 		if pressed(ebiten.KeyF3) {
 			owner, who = 1-m.player, "Spawned enemy"
 		}
+		cycle := debugSquads[m.world.Players[owner].Faction]
+		if len(cycle) == 0 {
+			cycle = debugSquads[faction.Forge]
+		}
+		s := cycle[m.spawnCycle%len(cycle)]
+		m.spawnCycle++
 		p := m.cam.ToWorld(m.cursor.X, m.cursor.Y)
 		m.pending = append(m.pending, sim.Command{
-			Kind: sim.CmdSpawn, Player: owner, Point: p, Type: types[i], Count: counts[i],
+			Kind: sim.CmdSpawn, Player: owner, Point: p, Type: s.t, Count: s.n,
 		})
-		m.say(fmt.Sprintf("%s %d %ss", who, counts[i], faction.Unit(types[i]).Name))
+		m.say(fmt.Sprintf("%s %d %ss", who, s.n, faction.Unit(s.t).Name))
 	}
 	if pressed(ebiten.KeyF4) {
 		m.revealAll = !m.revealAll
 	}
+}
+
+// debugSquads are the squads F2/F3 cycle through for each faction.
+var debugSquads = map[faction.ID][]struct {
+	t faction.UnitType
+	n int
+}{
+	faction.Forge: {{faction.Trooper, 6}, {faction.Outrider, 4}, {faction.Strider, 3}},
+	faction.Brood: {{faction.Biter, 8}, {faction.Leaper, 4}, {faction.Spitter, 4}, {faction.Broodmother, 2}, {faction.Behemoth, 2}},
 }
 
 func (m *Match) centroid(ids []sim.UnitID) geom.Vec {

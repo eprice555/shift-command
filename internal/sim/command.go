@@ -25,6 +25,7 @@ const (
 	CmdRally                         // buildings: rally new units to Point (or Res)
 	CmdAssist                        // workers: construct/repair Target or bank cargo there; others move to it
 	CmdShift                         // toggle SHIFT modes (Index -1), or set mode Index (0 base, 1 shifted)
+	CmdMorph                         // Brood: re-morph one selected unit into Type
 )
 
 // Command is a player instruction. Commands are the only way input reaches
@@ -78,6 +79,11 @@ func (w *World) apply(c *Command) {
 		return
 	case CmdShift:
 		w.shift(c, all)
+		return
+	case CmdMorph:
+		if c.Type < faction.UnitTypeCount {
+			w.remorphOne(c.Player, all, c.Type)
+		}
 		return
 	case CmdRally:
 		for _, b := range all {

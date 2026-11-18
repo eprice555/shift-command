@@ -97,6 +97,12 @@ type Unit struct {
 	hatch    int     // Hive: ticks toward the next Spawn
 	creepR   float64 // creep radius spread so far
 	consumed bool    // Drone that became a building: removed without a death
+
+	castCD   int      // ticks until the SHIFT ability can be cast again
+	leapTo   UnitID   // Pounce target while leaping
+	leapLeft int      // ticks before an unfinished leap gives up
+	life     int      // summoned unit: ticks until it expires (0 = never)
+	remorph  *remorph // cocoon re-morphing from another form
 }
 
 // Target returns the unit this one is currently fighting, or 0.
@@ -171,6 +177,9 @@ func (w *World) think(u *Unit) geom.Vec {
 		u.Cooldown--
 	}
 	u.firing, u.working = false, false
+	if w.tickBrood(u) {
+		return geom.Vec{}
+	}
 	if w.tickShift(u) {
 		return geom.Vec{}
 	}
@@ -195,6 +204,9 @@ func (w *World) think(u *Unit) geom.Vec {
 	if u.Morphing() {
 		w.morph(u)
 		return geom.Vec{}
+	}
+	if u.leapTo != 0 {
+		return w.leap(u)
 	}
 
 	// An explicit attack order overrides everything until the target dies

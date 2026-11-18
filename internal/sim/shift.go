@@ -55,9 +55,21 @@ func (w *World) shift(c *Command, all []*Unit) {
 		}
 	}
 	var refused Notice
+	cast := false
 	for _, u := range all {
 		m := faction.Unit(u.Type).Shift
-		if m == nil || !u.Complete || u.shifting > 0 {
+		if m == nil || !u.Complete || u.shifting > 0 || u.Morphing() {
+			continue
+		}
+		if m.Cast() {
+			if c.Index == 0 {
+				continue
+			}
+			if n := w.cast(u, m); n != NoticeNone {
+				refused = n
+			} else {
+				cast = true
+			}
 			continue
 		}
 		to := want[u.Type]
@@ -71,7 +83,9 @@ func (w *World) shift(c *Command, all []*Unit) {
 			refused = n
 		}
 	}
-	if refused != NoticeNone {
+	// One ready caster is enough: don't complain about the ones that
+	// weren't (still on cooldown, nothing in reach).
+	if refused != NoticeNone && !(cast && (refused == NoticeCooldown || refused == NoticeNoTarget)) {
 		w.notice(c.Player, refused, 0)
 	}
 }
@@ -253,7 +267,7 @@ func tooClose(u *Unit, d float64) bool {
 func (w *World) splash(u, t *Unit) {
 	wp := u.Def.Weapon
 	for _, o := range w.Units {
-		if o == t || o.Owner == u.Owner || o.HP <= 0 {
+		if o == t || o.Owner == u.Owner || o.HP <= 0 || o.Hidden() {
 			continue
 		}
 		d := o.Pos.Dist(t.Pos) - o.Def.Radius

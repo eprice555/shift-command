@@ -32,6 +32,9 @@ const (
 	NoticeCantLand         // no clear ground under a packed building
 	NoticeNeedCreep        // Brood building must be placed on creep
 	NoticeNoSpawn          // no idle Spawn to morph
+	NoticeCooldown         // SHIFT ability still recharging
+	NoticeNoTarget         // no enemy in reach for the SHIFT ability
+	NoticeSameForm         // re-morph into the form the unit already has
 )
 
 // String is the player-facing text for n.
@@ -61,6 +64,12 @@ func (n Notice) String() string {
 		return "Must be placed on creep"
 	case NoticeNoSpawn:
 		return "No Spawn ready: the Hive hatches one every 10s"
+	case NoticeCooldown:
+		return "Ability not ready"
+	case NoticeNoTarget:
+		return "No enemy in range"
+	case NoticeSameForm:
+		return "Already that form"
 	}
 	return ""
 }
@@ -539,6 +548,10 @@ func (w *World) cancel(p PlayerID, b *Unit, i int) {
 		return
 	}
 	if len(b.Queue) == 0 {
+		return
+	}
+	if b.remorph != nil {
+		w.unRemorph(b)
 		return
 	}
 	if i < 0 || i >= len(b.Queue) {

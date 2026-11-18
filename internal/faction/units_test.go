@@ -50,6 +50,16 @@ func TestUnitDefsSane(t *testing.T) {
 			}
 			continue
 		}
+		if d.Life > 0 {
+			// Summoned: free, no supply, not trained anywhere, but a fighter.
+			if d.Crystals != 0 || d.Supply != 0 || d.Speed <= 0 || !d.Armed() || d.HP <= 0 {
+				t.Errorf("%s: bad summon stats %+v", d.Name, d)
+			}
+			if _, ok := TrainedAt(d.Type); ok {
+				t.Errorf("%s: summons shouldn't be trainable", d.Name)
+			}
+			continue
+		}
 		if d.Name == "" || d.HP <= 0 || d.Radius <= 0 || d.Sight <= 0 || d.BuildTime <= 0 || d.Crystals <= 0 {
 			t.Errorf("%s: bad stats %+v", d.Name, d)
 		}
@@ -180,5 +190,44 @@ func TestForgeShiftModes(t *testing.T) {
 	}
 	if h := Unit(CommandHub).Shifted(); h.Speed == 0 || h.DropOff || len(h.Trains) != 0 || h.SupplyProvided == 0 {
 		t.Errorf("packed hub: speed %.1f dropoff %v trains %v supply %.0f", h.Speed, h.DropOff, h.Trains, h.SupplyProvided)
+	}
+}
+
+func TestBroodShiftModes(t *testing.T) {
+	for _, d := range Units() {
+		if d.Faction != Brood {
+			continue
+		}
+		hasMode := d.Shift != nil
+		wantMode := !d.Building && !d.Worker && !d.Morphs && d.Life == 0
+		if hasMode != wantMode {
+			t.Errorf("%s: has SHIFT mode %v, want %v", d.Name, hasMode, wantMode)
+		}
+	}
+	if b := Unit(Biter).Shifted(); !b.Burrowed || b.Speed != 0 || b.Armed() || Unit(Biter).Burrowed {
+		t.Errorf("burrowed biter: hidden %v speed %.1f armed %v", b.Burrowed, b.Speed, b.Armed())
+	}
+	if r := Unit(Spitter).Shifted(); r.Weapon.Range != Unit(Spitter).Weapon.Range+2 || r.Speed != 0 {
+		t.Errorf("rooted spitter: range %.0f speed %.1f", r.Weapon.Range, r.Speed)
+	}
+	if s := Unit(Behemoth).Shifted(); s.Armor != Unit(Behemoth).Armor+4 || s.Speed != Unit(Behemoth).Speed/2 || !s.Armed() {
+		t.Errorf("shelled behemoth: armor %.0f speed %.1f", s.Armor, s.Speed)
+	}
+	for _, c := range []UnitType{Leaper, Broodmother} {
+		m := Unit(c).Shift
+		if !m.Cast() || m.Time != 0 || m.Duration != 0 {
+			t.Errorf("%s: SHIFT should be an instant cast, got %+v", Unit(c).Name, m)
+		}
+		if s := Unit(c).Shifted(); s.Speed != Unit(c).Speed || s.Weapon != Unit(c).Weapon {
+			t.Errorf("%s: casting shouldn't change the def", Unit(c).Name)
+		}
+	}
+	if m := Unit(Broodmother).Shift; m.Summon != Mite || m.SummonCount != 4 || Unit(Mite).Life != 10 {
+		t.Errorf("brood burst: %+v mite life %.0f", m, Unit(Mite).Life)
+	}
+	for _, f := range Unit(Spawn).Trains {
+		if f == Mite {
+			t.Error("Spawn shouldn't morph into Mites")
+		}
 	}
 }

@@ -37,3 +37,56 @@ func TestCardShiftButton(t *testing.T) {
 		t.Errorf("sieged Bastion SHIFT label = %q, want TANK", got)
 	}
 }
+
+func cardButton(w *sim.World, kind ActionKind, typ faction.UnitType, ids ...sim.UnitID) (Button, bool) {
+	for _, b := range CommandCard(w, 0, ids) {
+		if b.Kind == kind && (typ == 0 || b.Type == typ) {
+			return b, true
+		}
+	}
+	return Button{}, false
+}
+
+func TestCardRemorph(t *testing.T) {
+	w := sim.NewSkirmishFor([sim.NumPlayers]faction.ID{faction.Brood, faction.Forge})
+	w.Players[0].Crystals, w.Players[0].Flux = 1000, 1000
+	biter := w.Spawn(0, faction.Biter, geom.V(20, 20))
+
+	b, ok := cardButton(w, ActMorph, faction.Spitter, biter.ID)
+	if !ok {
+		t.Fatal("Biter card has no Spitter re-morph")
+	}
+	if b.Enabled || b.Reason != "Requires Spawning Pit" {
+		t.Errorf("Spitter re-morph without a Spawning Pit: enabled %v, reason %q", b.Enabled, b.Reason)
+	}
+	w.Spawn(0, faction.SpawningPit, geom.V(30, 30))
+	w.Step(nil)
+	b, _ = cardButton(w, ActMorph, faction.Spitter, biter.ID)
+	if !b.Enabled || b.Crystals != 50 || b.Flux != 25 {
+		t.Errorf("Spitter re-morph: enabled %v (%q), cost %d/%d, want 50/25", b.Enabled, b.Reason, b.Crystals, b.Flux)
+	}
+	if b, _ := cardButton(w, ActMorph, faction.Biter, biter.ID); b.Enabled {
+		t.Error("Biter can re-morph into a Biter")
+	}
+
+	w.Step([]sim.Command{{Kind: sim.CmdMorph, Player: 0, Units: []sim.UnitID{biter.ID}, Type: faction.Spitter}})
+	if _, ok := cardButton(w, ActCancel, 0, biter.ID); !ok {
+		t.Error("re-morph cocoon has no CANCEL")
+	}
+	if _, ok := cardButton(w, ActMorph, 0, biter.ID); ok {
+		t.Error("cocoon-only selection offers re-morphs")
+	}
+}
+
+func TestCardCastCooldown(t *testing.T) {
+	w := sim.NewSandbox()
+	mother := w.Spawn(0, faction.Broodmother, geom.V(20, 20))
+	if b, _ := cardButton(w, ActShift, 0, mother.ID); !b.Enabled || b.Label != "BURST" {
+		t.Fatalf("Broodmother SHIFT: enabled %v, label %q", b.Enabled, b.Label)
+	}
+	w.Step([]sim.Command{{Kind: sim.CmdShift, Player: 0, Units: []sim.UnitID{mother.ID}, Index: -1}})
+	b, _ := cardButton(w, ActShift, 0, mother.ID)
+	if b.Enabled || b.Cooldown <= 0 {
+		t.Errorf("Brood Burst on cooldown: enabled %v, cooldown %v", b.Enabled, b.Cooldown)
+	}
+}

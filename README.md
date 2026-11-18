@@ -17,7 +17,8 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 - **M2a (economy, base building, production)**: the match is now a real skirmish. Each side starts with a Command Hub and 6 Riggers. Riggers mine Crystals on their own; you build Generators (supply), Extractors on flux vents (Flux), a Drill Yard and a Foundry, then train Troopers, Outriders, Menders, Striders and Bastions. Destroy every enemy building to win. All stats are placeholders.
 - **M2b (enemy AI)**: the enemy Forge now plays. It follows a data-driven build order, mines and takes Flux, adds production, expands to its natural at around 4 minutes, and keeps its supply ahead. It defends its base, gathers an army at a staging point, attacks when the wave is big enough (each wave is bigger than the last), and retreats when a fight turns against it. It scouts expansions to find your buildings. There is one difficulty for now (Easy/Normal/Hard come in M5). When the enemy hits something of yours off-screen, you get an **Under attack!** message and a red ping on the minimap; press **Space** to jump there.
 - **M2c (Forge SHIFT modes)**: press **Shift** (or the SHIFT slot on the command card) to switch the selection's gear-shift mode; see the table below. The enemy AI uses them too: it sieges Bastions and plants Striders near enemies, overdrives Troopers into fights, boosts Outriders while travelling, and packs everything up before retreating. The enemy never relocates its buildings.
-- **M3a (The Brood core)**: the Brood is playable. On the title screen, press **Shift** to pick your faction (Forge or Brood), then press **Enter** or click to deploy. The enemy is still a Forge AI until M5. Brood SHIFT abilities (Burrow, Pounce, Root, Brood Burst, Shell) and re-morphing come in M3b.
+- **M3a (The Brood core)**: the Brood is playable. On the title screen, press **Shift** to pick your faction (Forge or Brood), then press **Enter** or click to deploy. The enemy is still a Forge AI until M5.
+- **M3b (Brood SHIFT and re-morph)**: Brood units get their SHIFT abilities (Burrow, Pounce, Root, Brood Burst, Shell; see the table below) and can **re-morph** into another Brood form from the command card. Balance numbers are placeholders.
 
 The title screen still uses the M0 emblem morph to show the selected faction.
 
@@ -35,6 +36,8 @@ The title screen still uses the M0 emblem morph to show the selected faction.
 2. Drones mine like Riggers. A Drone **morphs into a building** and is used up: Nest Pod (+8 supply), Extractor, Spawning Pit, Gestation Den, or another Hive. Every building except the Extractor must be placed on **creep**, the magenta ground that spreads from Hives and other Brood buildings. Cancelling an unfinished building returns the Drone.
 3. Brood units and buildings slowly regenerate HP. The Broodmother also heals nearby wounded allies.
 
+4. **Re-morph**: select Brood combat units and use the top row of the command card (**Q W E R T**: Biter, Leaper, Spitter, Broodmother, Behemoth). One selected unit cocoons and hatches as the new form in half its normal morph time. You pay the difference in value between the two forms (a Biter counts as half a pair); changing into a cheaper form is free but gives no refund. The unit keeps its HP fraction. **Esc** cancels the cocoon and refunds it. Drones can't re-morph from the card yet.
+
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 
 ### Forge SHIFT modes
@@ -50,6 +53,18 @@ Shift toggles every selected unit type separately: if any unit of a type is in i
 | Bastion | **Tank / Artillery** | Artillery: range 13 splash shells (no friendly fire), minimum range 2, can't move (2 s to switch) |
 | Command Hub, Drill Yard, Foundry | **Landed / Packed** | Packed: the building lifts off (1.5 s), can't train or accept resources, and flies over walls when you right click. Press Shift again to land on a clear site nearby. It still provides supply and can be attacked. You must empty the production queue first |
 
+### Brood SHIFT abilities
+
+Burrow, Root and Shell are modes that toggle like the Forge's. Pounce and Brood Burst are casts: Shift fires them on every selected unit that is ready, and the SHIFT slot shows the cooldown.
+
+| Unit | SHIFT | Effect |
+|---|---|---|
+| Biter | **Burrowed / Surface** | Hides underground (0.75 s): invisible to enemies and can't be hit, but can't move or attack. There is no detection yet |
+| Leaper | **Pounce** | Leaps onto the current target or the nearest enemy within 5 tiles for 12 damage. 8 s cooldown |
+| Spitter | **Mobile / Rooted** | Rooted: +2 range, can't move (1 s to switch) |
+| Broodmother | **Brood Burst** | Spawns 4 Mites that join her fight and die after 10 s. 25 s cooldown |
+| Behemoth | **Open / Shell** | Shell: +4 armor, half speed (0.5 s to switch) |
+
 ## Controls (so far)
 
 | Input | Action |
@@ -59,7 +74,7 @@ Shift toggles every selected unit type separately: if any unit of a type is in i
 | **Tab** or **F** + click | Add to/toggle selection; with an order, queue it |
 | **Right click** | Move, attack the enemy under the cursor, gather from crystals/vents, or help build/repair your building |
 | **Right click** (building selected) | Set the rally point; a packed building flies there instead |
-| **Q W E R T** (**A**) | Command card: build (worker selected), train (building selected), or morph (Hive or Spawn selected) |
+| **Q W E R T** (**A**) | Command card: build (worker selected), train (building selected), morph (Hive or Spawn selected), or re-morph (Brood army selected) |
 | **A**, then left click | Attack-move (click an enemy to attack it) |
 | **S** / **H** | Stop / hold position |
 | **Ctrl** or **Alt** + **0–9** | Set control group (use Alt in the browser, where Ctrl+digit switches tabs) |
@@ -68,11 +83,11 @@ Shift toggles every selected unit type separately: if any unit of a type is in i
 | **Mouse wheel** | Zoom |
 | **Minimap** | Left click/drag: jump camera; right click: move |
 | **Space** | Jump the camera to the last "Under attack!" alert |
-| **Shift** | Faction SHIFT ability: switch the selection's gear-shift modes (Forge, see above). On the title screen: pick your faction |
+| **Shift** | Faction SHIFT ability: switch the selection's modes or cast its ability (see the tables above). On the title screen: pick your faction |
 | **Esc** | Cancel placement or targeting, then cancel the last queued unit / construction / selected cocoons, then deselect |
 | **Click a queue slot** | Cancel that queued unit (refunded) |
 | **F1** | Toggle the controls panel |
-| **F2** / **F3** | Debug: spawn your / an enemy squad at the cursor |
+| **F2** / **F3** | Debug: spawn your / an enemy squad of that side's faction at the cursor (cycles through unit types) |
 | **F4** | Debug: toggle fog of war |
 
 In the browser, click the game once to give it keyboard focus (required on itch.io, where the game runs in an iframe). The game shows a "click to focus" hint whenever it is not receiving keyboard input.

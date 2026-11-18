@@ -68,6 +68,9 @@ func broodShape(dst []geom.Vec, t faction.UnitType) []geom.Vec {
 		return blob(dst, 20, 5, 0.18, 0.9, 0.9)
 	case faction.Behemoth:
 		return blob(dst, 24, 7, 0.1, 0.95, 0.85)
+	case faction.Mite:
+		// Spiky dart.
+		return append(dst, geom.V(1.2, 0), geom.V(0.1, 0.45), geom.V(-0.2, 0.9), geom.V(-0.5, 0.3), geom.V(-0.9, 0), geom.V(-0.5, -0.3), geom.V(-0.2, -0.9), geom.V(0.1, -0.45))
 	}
 	return blob(dst, 12, 0, 0, 0.8, 0.8)
 }
