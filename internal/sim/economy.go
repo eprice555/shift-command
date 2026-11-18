@@ -262,7 +262,7 @@ func (w *World) recount() {
 		p := &w.Players[u.Owner]
 		p.Supply += u.Def.Supply
 		for _, t := range u.Queue {
-			p.Supply += faction.QueueSupply(t)
+			p.Supply += u.queueSupply(t)
 		}
 		if u.Complete {
 			p.SupplyCap += u.Def.SupplyProvided

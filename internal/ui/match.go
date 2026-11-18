@@ -407,10 +407,19 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		} else {
 			pts = unitShape(pts[:0], u.Type)
 		}
+		// Burrowing squashes the body flat; pouncing swells it mid-air.
+		squash, swell := 1.0, 1.0
+		if m := faction.Unit(u.Type).Shift; m != nil && m.Burrow {
+			squash = 1 - 0.7*frac
+		}
+		if u.Leaping() {
+			swell = 1.35
+		}
 		for i, q := range pts {
 			if brood {
 				q = wobble(q, i, u.ID, r.frame, 0.06)
 			}
+			q = geom.V(q.X*swell*(1+0.2*(1-squash)), q.Y*swell*squash)
 			x, y := at(q)
 			if i == 0 {
 				fill.MoveTo(x, y)
@@ -434,7 +443,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			x, y = at(geom.V(l, 0))
 			stroke.LineTo(x, y)
 		}
-		if frac > 0 {
+		if frac > 0 || u.Leaping() {
 			rings = modeVisual(stroke, rings, u, frac, at, sx, sy, rad, scale, r.frame)
 		}
 		if u.Cargo > 0 {
@@ -502,6 +511,33 @@ func modeVisual(stroke *vector.Path, rings []ring, u *sim.Unit, frac float64, at
 		seg(geom.V(-0.8, -0.3), geom.V(-0.8-l, -0.3))
 	case faction.Trooper:
 		rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * (1.45 + 0.15*pulse)), 1.5, frac * (0.5 + 0.5*pulse)})
+	case faction.Biter:
+		// Dirt ring over the burrow.
+		rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * 1.25), 1, 0.35 * frac})
+	case faction.Leaper:
+		// Speed streaks trail the pounce.
+		for _, y := range [3]float64{-0.45, 0, 0.45} {
+			seg(geom.V(-1.1, y), geom.V(-1.9-0.3*pulse, y))
+		}
+	case faction.Spitter:
+		// Root tendrils dig in around the body.
+		for i := range 6 {
+			sn, cs := math.Sincos(float64(i)*math.Pi/3 + 0.3)
+			a := geom.V(cs*0.85, sn*0.85)
+			b := geom.V(cs*(0.85+0.55*frac), sn*(0.85+0.55*frac))
+			seg(a, b)
+			seg(b, b.Add(geom.V(-sn*0.2*frac, cs*0.2*frac)))
+		}
+	case faction.Behemoth:
+		// Armour plates close over the back.
+		for i := range 5 {
+			a0 := math.Pi*0.55 + float64(i)*math.Pi*0.18
+			a1 := a0 + math.Pi*0.14*frac
+			s0, c0 := math.Sincos(a0)
+			s1, c1 := math.Sincos(a1)
+			seg(geom.V(c0*1.15, s0*1.15), geom.V(c1*1.15, s1*1.15))
+		}
+		rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * 1.3), 2, 0.4 * frac})
 	case faction.Mender:
 		seg(geom.V(0, -0.9), geom.V(0, -0.9-0.6*frac))
 		seg(geom.V(-0.25, -1.2-0.3*frac), geom.V(0.25, -1.2-0.3*frac))

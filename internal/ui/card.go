@@ -21,6 +21,7 @@ const (
 	ActHold
 	ActCancel // cancel construction or the last queued unit
 	ActShift  // toggle the selection's SHIFT modes
+	ActMorph  // Brood: re-morph one selected unit into Type
 )
 
 // Command card layout: two rows of five buttons.
@@ -55,6 +56,10 @@ type Button struct {
 	Reason string
 	// Mixed is set on a SHIFT button covering several unit types.
 	Mixed bool
+	// Crystals and Flux are a re-morph button's cost.
+	Crystals, Flux int
+	// Cooldown is the seconds until a SHIFT ability is ready again.
+	Cooldown float64
 }
 
 // CardRect returns the command card's screen rect.
@@ -127,6 +132,8 @@ func shortName(t faction.UnitType) string {
 		return "BHMTH"
 	case faction.Spawn:
 		return "SPAWN"
+	case faction.Mite:
+		return "MITE"
 	}
 	return "?"
 }
@@ -153,8 +160,11 @@ func availability(w *sim.World, p sim.PlayerID, t faction.UnitType) (bool, strin
 func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 	var units []*sim.Unit
 	worker, mobile, armed := false, false, false
-	// spawn: every mobile unit is an idle Spawn; cocoon: some are morphing.
-	spawn, cocoon := true, false
+	// spawn: every mobile unit is an idle Spawn; cocoon: some are morphing;
+	// larva: every mobile unit is a Spawn or cocoon.
+	spawn, cocoon, larva := true, false, true
+	// army: some mobile unit could re-morph into another Brood form.
+	army := false
 	var building *sim.Unit
 	for _, id := range sel {
 		u := w.Unit(id)
@@ -173,6 +183,8 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 			armed = armed || u.Def.Armed()
 			spawn = spawn && u.Def.Morphs && !u.Morphing()
 			cocoon = cocoon || u.Morphing()
+			larva = larva && u.Def.Morphs
+			army = army || sim.Remorphable(u)
 		}
 	}
 	if len(units) == 0 {
@@ -196,7 +208,7 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 		}
 	}
 	switch {
-	case mobile && (spawn || cocoon):
+	case mobile && larva:
 		if spawn {
 			forms(units[0].Def.Trains)
 		}
@@ -204,6 +216,14 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 			slot(1, 4, ActCancel, 0, "CANCEL")
 		}
 	case mobile:
+		if army && !worker {
+			for i, t := range remorphForms {
+				out = append(out, morphButton(w, p, units, t, i))
+			}
+		}
+		if cocoon {
+			slot(1, 4, ActCancel, 0, "CANCEL")
+		}
 		if worker {
 			for i, t := range faction.Buildable(units[0].Def.Faction) {
 				if i < CardCols {
@@ -241,8 +261,47 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 	return out
 }
 
+// remorphForms are the Brood combat forms offered on an army's card.
+var remorphForms = []faction.UnitType{faction.Biter, faction.Leaper, faction.Spitter, faction.Broodmother, faction.Behemoth}
+
+// morphButton is the card slot for re-morphing one of units into t, priced
+// for the first unit that would take it.
+func morphButton(w *sim.World, p sim.PlayerID, units []*sim.Unit, t faction.UnitType, col int) Button {
+	b := Button{Kind: ActMorph, Type: t, Row: 0, Col: col, Key: cardKeys[0][col], Label: shortName(t)}
+	var u *sim.Unit
+	for _, c := range units {
+		if sim.CanRemorph(c, t) && c.Complete && !c.Morphing() && !c.Shifting() && !c.Leaping() {
+			u = c
+			break
+		}
+	}
+	if u == nil {
+		b.Reason = "Already " + faction.Unit(t).Name + "s"
+		return b
+	}
+	b.Crystals, b.Flux = sim.RemorphCost(u.Type, t)
+	pl := w.Players[p]
+	switch req, missing := w.Missing(p, t); {
+	case missing:
+		b.Reason = "Requires " + faction.Unit(req).Name
+	case pl.Crystals < b.Crystals:
+		b.Reason = sim.NoticeCrystals.String()
+	case pl.Flux < b.Flux:
+		b.Reason = sim.NoticeFlux.String()
+	case pl.Supply+faction.Unit(t).Supply-faction.Unit(u.Type).Supply > pl.SupplyCap+1e-9 && faction.Unit(t).Supply > faction.Unit(u.Type).Supply:
+		b.Reason = sim.NoticeSupply.String()
+	default:
+		b.Enabled = true
+	}
+	return b
+}
+
 // modeLabels abbreviates mode names for the command card.
 var modeLabels = map[string]string{
+	"Burrowed": "BURROW", "Surface": "RISE",
+	"Pounce": "POUNCE", "Brood Burst": "BURST",
+	"Rooted": "ROOT",
+	"Shell":  "SHELL", "Open": "OPEN",
 	"Overdrive": "OVRDV", "Normal": "OVRDV",
 	"Boost": "BOOST", "Cruise": "CRUISE",
 	"Planted": "PLANT", "Walk": "WALK",
@@ -257,6 +316,7 @@ var modeLabels = map[string]string{
 func shiftButton(units []*sim.Unit, buildings bool) (Button, bool) {
 	var types []faction.UnitType
 	toShift := map[faction.UnitType]bool{}
+	cooldown := map[faction.UnitType]float64{} // soonest-ready caster per type
 	for _, u := range units {
 		if u.Def.Building != buildings {
 			continue
@@ -277,6 +337,11 @@ func shiftButton(units []*sim.Unit, buildings bool) (Button, bool) {
 		if u.Mode == 0 || m.Timed() {
 			toShift[u.Type] = true
 		}
+		if m.Cast() {
+			if cd, ok := cooldown[u.Type]; !ok || u.CastLeft() < cd {
+				cooldown[u.Type] = u.CastLeft()
+			}
+		}
 	}
 	if len(types) == 0 {
 		return Button{}, false
@@ -289,6 +354,9 @@ func shiftButton(units []*sim.Unit, buildings bool) (Button, bool) {
 			name = m.Name
 		}
 		b.Label = modeLabels[name]
+		if cd := cooldown[types[0]]; cd > 0 {
+			b.Cooldown, b.Enabled, b.Reason = cd, false, sim.NoticeCooldown.String()
+		}
 	}
 	return b, true
 }

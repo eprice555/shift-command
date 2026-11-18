@@ -162,7 +162,7 @@ func (w *World) Count(owner PlayerID) int {
 
 // VisibleTo reports whether player p can currently see unit u.
 func (w *World) VisibleTo(p PlayerID, u *Unit) bool {
-	return u.Owner == p || w.Fog[p].VisibleAt(u.Pos)
+	return u.Owner == p || !u.Hidden() && w.Fog[p].VisibleAt(u.Pos)
 }
 
 // Step applies cmds and advances the world by one tick.
@@ -277,12 +277,14 @@ func (w *World) separate() {
 	us := w.Units
 	for i := range us {
 		a := us[i]
-		if a.Def.Building {
+		// Burrowed units are underground and leapers are airborne:
+		// nothing bumps into them.
+		if a.Def.Building || a.Hidden() || a.Leaping() {
 			continue
 		}
 		for j := i + 1; j < len(us); j++ {
 			b := us[j]
-			if b.Def.Building || a.Owner == b.Owner && a.gathering() && b.gathering() {
+			if b.Def.Building || b.Hidden() || b.Leaping() || a.Owner == b.Owner && a.gathering() && b.gathering() {
 				continue
 			}
 			minD := a.Def.Radius + b.Def.Radius

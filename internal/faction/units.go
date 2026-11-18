@@ -91,6 +91,7 @@ const (
 	Spitter
 	Broodmother
 	Behemoth
+	Mite
 	Hive
 	NestPod
 	BroodExtractor
@@ -136,6 +137,9 @@ type UnitDef struct {
 	// Shift is the unit's SHIFT mode, or nil if it has none.
 	Shift *Mode
 
+	Burrowed bool    // hidden from enemies (a SHIFT mode sets it)
+	Life     float64 // > 0: a summoned unit that expires after this many seconds
+
 	// Brood morphing. A Morphs unit (Spawn) turns into one of its Trains
 	// forms in place; Spawns is how many units one morph yields (Biters
 	// hatch in pairs; 0 means 1). Cost is per morph, Supply per unit.
@@ -169,9 +173,12 @@ func QueueSupply(t UnitType) float64 {
 // Armed reports whether the def has a weapon.
 func (d UnitDef) Armed() bool { return d.Weapon.Damage > 0 }
 
-// Mode is a Forge unit's "gear shift": an alternate operating mode toggled
-// with SHIFT. While it is on, the sim swaps the unit's def for Shifted(), so
-// every stat lookup sees the mode without special cases.
+// Mode is a unit's SHIFT ability. Most are alternate operating modes
+// toggled with SHIFT (the Forge's gear shifts, the Brood's Burrow, Root,
+// and Shell): while one is on, the sim swaps the unit's def for Shifted(),
+// so every stat lookup sees the mode without special cases. A mode with a
+// Cooldown is instead an instant ability cast with SHIFT (Pounce, Brood
+// Burst).
 type Mode struct {
 	Name, Base string  // shifted and base mode names, e.g. "Artillery" / "Tank"
 	Desc       string  // one-line effect summary for tooltips
@@ -185,13 +192,25 @@ type Mode struct {
 	Weapon   *Weapon // replaces the weapon
 	Immobile bool    // can't move
 	Unarmed  bool    // can't attack
+	ArmorAdd float64 // armor bonus
+	Burrow   bool    // hidden from enemies; can't move or attack
 
 	AuraRange, AuraRate float64 // heal aura: radius and HP per second per ally
 
 	// Buildings: lift off and fly at FlySpeed (no production or drop-off).
 	Pack     bool
 	FlySpeed float64
+
+	// Instant abilities.
+	Cooldown    float64  // > 0: cast on SHIFT, then wait this many seconds
+	Leap        float64  // leap at an enemy up to this far away (tiles)
+	LeapDamage  float64  // damage dealt on landing
+	Summon      UnitType // summon SummonCount of this type around the caster
+	SummonCount int
 }
+
+// Cast reports whether the mode is an instant ability rather than a toggle.
+func (m *Mode) Cast() bool { return m.Cooldown > 0 }
 
 // Timed reports whether the mode wears off on its own.
 func (m *Mode) Timed() bool { return m.Duration > 0 }
@@ -218,9 +237,13 @@ func (d UnitDef) Shifted() UnitDef {
 	if m.Immobile {
 		s.Speed = 0
 	}
-	if m.Unarmed {
+	if m.Unarmed || m.Burrow {
 		s.Weapon = Weapon{}
 	}
+	if m.Burrow {
+		s.Speed, s.Burrowed = 0, true
+	}
+	s.Armor += m.ArmorAdd
 	if m.AuraRange > 0 {
 		s.HealAura, s.HealRange, s.HealRate = true, m.AuraRange, m.AuraRate
 	}
@@ -327,6 +350,7 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		HP: 35, ArmorType: Light, Radius: 0.28, Speed: 4, Sight: 7, Bio: true, Regen: broodUnitRegen,
 		Weapon:   Weapon{Damage: 5, Type: Normal, Range: 0.15, Cooldown: 0.7},
 		Requires: []UnitType{SpawningPit},
+		Shift:    &Mode{Name: "Burrowed", Desc: "Hide underground: invisible to enemies, can't move or attack", Base: "Surface", Time: 0.75, Burrow: true},
 	},
 	Leaper: {
 		Type: Leaper, Faction: Brood, Name: "Leaper", Role: "Raider: hard-hitting melee",
@@ -334,6 +358,7 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		HP: 55, ArmorType: Light, Radius: 0.36, Speed: 3.6, Sight: 8, Bio: true, Regen: broodUnitRegen,
 		Weapon:   Weapon{Damage: 9, Type: Normal, Range: 0.25, Cooldown: 0.9},
 		Requires: []UnitType{SpawningPit},
+		Shift:    &Mode{Name: "Pounce", Desc: "Leap onto an enemy up to 5 tiles away for 12 damage · 8s cooldown", Cooldown: 8, Leap: 5, LeapDamage: 12},
 	},
 	Spitter: {
 		Type: Spitter, Faction: Brood, Name: "Spitter", Role: "Ranged acid",
@@ -341,6 +366,7 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		HP: 85, ArmorType: Light, Radius: 0.45, Speed: 2.6, Sight: 8, Bio: true, Regen: broodUnitRegen,
 		Weapon:   Weapon{Damage: 11, Type: Normal, Range: 5, Cooldown: 1.2},
 		Requires: []UnitType{SpawningPit},
+		Shift:    &Mode{Name: "Rooted", Desc: "+2 range, can't move", Base: "Mobile", Time: 1, Immobile: true, RangeAdd: 2},
 	},
 	Broodmother: {
 		Type: Broodmother, Faction: Brood, Name: "Broodmother", Role: "Support: spits and transfuses HP to the brood",
@@ -349,6 +375,7 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		Weapon:   Weapon{Damage: 8, Type: Normal, Range: 4, Cooldown: 1.2},
 		HealRate: 6, HealRange: 3,
 		Requires: []UnitType{GestationDen},
+		Shift:    &Mode{Name: "Brood Burst", Desc: "Spawn 4 Mites that live for 10s · 25s cooldown", Cooldown: 25, Summon: Mite, SummonCount: 4},
 	},
 	Behemoth: {
 		Type: Behemoth, Faction: Brood, Name: "Behemoth", Role: "Heavy melee tank",
@@ -356,6 +383,13 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		HP: 400, Armor: 2, ArmorType: Armored, Radius: 0.85, Speed: 2.4, Sight: 8, Bio: true, Regen: broodUnitRegen,
 		Weapon:   Weapon{Damage: 25, Type: Normal, Range: 0.4, Cooldown: 1.4},
 		Requires: []UnitType{GestationDen},
+		Shift:    &Mode{Name: "Shell", Desc: "+4 armor, half speed", Base: "Open", Time: 0.5, ArmorAdd: 4, SpeedMul: 0.5},
+	},
+	Mite: {
+		Type: Mite, Faction: Brood, Name: "Mite", Role: "Short-lived swarmer from a Brood Burst",
+		HP: 20, ArmorType: Light, Radius: 0.22, Speed: 4.2, Sight: 6, Bio: true, Regen: broodUnitRegen,
+		Weapon: Weapon{Damage: 4, Type: Normal, Range: 0.15, Cooldown: 0.6},
+		Life:   10,
 	},
 	Hive: {
 		Type: Hive, Faction: Brood, Name: "Hive", Role: "HQ: hatches Spawn, spreads creep, cargo drop-off",

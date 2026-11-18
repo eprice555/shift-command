@@ -49,7 +49,7 @@ func (u *Unit) MorphFrac() float64 {
 	if !u.Morphing() {
 		return 0
 	}
-	return float64(u.Progress) / float64(ticksFor(faction.Unit(u.Queue[0]).BuildTime))
+	return float64(u.Progress) / float64(u.morphTicks())
 }
 
 // HatchFrac is a Hive's progress toward its next Spawn in [0, 1].
@@ -124,14 +124,20 @@ func (w *World) morph(u *Unit) {
 	t := u.Queue[0]
 	def := faction.Unit(t)
 	u.Progress++
-	if u.Progress < ticksFor(def.BuildTime) {
+	if u.Progress < u.morphTicks() {
 		return
 	}
 	home := w.byID[u.home]
-	u.Type, u.Def, u.HP = t, def, def.HP
-	u.Queue, u.Progress, u.home, u.Hold = nil, 0, 0, false
+	n := def.Yield()
+	hp := def.HP
+	if u.remorph != nil {
+		// A re-morph hatches one unit and keeps its wounds.
+		n, hp = 1, def.HP*u.HP/u.Def.HP
+	}
+	u.Type, u.Def, u.HP = t, def, hp
+	u.Queue, u.Progress, u.home, u.Hold, u.remorph = nil, 0, 0, false, nil
 	out := []*Unit{u}
-	for i := 1; i < def.Yield(); i++ {
+	for i := 1; i < n; i++ {
 		a := float64(i) * 2 * math.Pi / float64(def.Yield())
 		out = append(out, w.Spawn(u.Owner, t, u.Pos.Add(geom.V(math.Cos(a), math.Sin(a)).Scale(def.Radius*2))))
 	}
