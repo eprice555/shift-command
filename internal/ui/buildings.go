@@ -62,6 +62,10 @@ func buildingOutline(fill, stroke *vector.Path, t faction.UnitType, rect geom.Re
 		broodBuilding(fill, stroke, t, rect, complete, frac, wob, cam)
 		return
 	}
+	if isPhase(t) {
+		phaseBuilding(fill, stroke, t, rect, complete, frac, wob, cam)
+		return
+	}
 	const inset = 0.12
 	a := cam.ToScreenV(rect.Min.Add(geom.V(inset, inset)))
 	b := cam.ToScreenV(rect.Max.Sub(geom.V(inset, inset)))

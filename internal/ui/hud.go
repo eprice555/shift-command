@@ -147,10 +147,16 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 			"Riggers mine crystals on their own. Select one and press",
 			"Q-T to build. Select the Hub and press Q to train Riggers.",
 		}
-		if v.World.Players[v.Player].Faction == faction.Brood {
+		switch v.World.Players[v.Player].Faction {
+		case faction.Brood:
 			help = [2]string{
 				"Drones mine on their own and morph into buildings (Q-T,",
 				"on creep). Select the Hive and press Q-T/A to morph Spawn.",
+			}
+		case faction.Phasebound:
+			help = [2]string{
+				"Drifters summon buildings (Q-T) that warp in on their own.",
+				"Gates need an Anchor's power field. Shields recharge.",
 			}
 		}
 		drawLeft(screen, help[0], r.smallFace, x, y+26, colDim)
@@ -168,13 +174,21 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 		drawRight(screen, unitState(u), r.smallFace, box.Max.X-14, y, colDim)
 		drawLeft(screen, d.Role, r.smallFace, x, y+22, colDim)
 		hp := fmt.Sprintf("HP %.0f/%.0f   ARMOR %s %g   SPEED %g", math.Max(u.HP, 0), d.HP, d.ArmorType, d.Armor, d.Speed)
+		if d.Shield > 0 {
+			hp = fmt.Sprintf("HP %.0f/%.0f   SHIELD %.0f/%.0f   %s %g   SPEED %g", math.Max(u.HP, 0), d.HP, u.Shield, d.Shield, d.ArmorType, d.Armor, d.Speed)
+		}
 		drawLeft(screen, hp, r.smallFace, x, y+44, colText)
 		var line string
 		switch wp := d.Weapon; {
 		case d.Armed():
 			line = fmt.Sprintf("WEAPON %g %s   RANGE %g   COOLDOWN %gs", wp.Damage, wp.Type, wp.Range, wp.Cooldown)
+		case d.ShieldHeal:
+			line = fmt.Sprintf("RESTORES %g SHIELD/s   RANGE %g", d.HealRate, d.HealRange)
 		case d.HealRate > 0:
 			line = fmt.Sprintf("HEALS %g HP/s   RANGE %g   (infantry)", d.HealRate, d.HealRange)
+		}
+		if wp := d.Weapon; wp.VsWorker > 0 {
+			line += fmt.Sprintf("   +%g VS WORKERS", wp.VsWorker)
 		}
 		if d.Worker {
 			line = "NO CARGO"
@@ -191,6 +205,9 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 		vector.FillRect(screen, float32(x), float32(y+78), bw, 4, color.RGBA{0x20, 0x26, 0x38, 0xFF}, false)
 		frac := math.Max(u.HP, 0) / d.HP
 		vector.FillRect(screen, float32(x), float32(y+78), bw*float32(frac), 4, hpColor(frac), false)
+		if d.Shield > 0 {
+			vector.FillRect(screen, float32(x), float32(y+84), bw*float32(u.Shield/d.Shield), 2, colShield, false)
+		}
 	default:
 		r.drawWireframes(screen, v, units, box)
 	}
@@ -202,6 +219,9 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 	drawLeft(screen, strings.ToUpper(d.Name), r.hudFace, x, y, PlayerColor(v.World, u.Owner, v.Player))
 	drawRight(screen, unitState(u), r.smallFace, box.Max.X-14, y, colDim)
 	stats := fmt.Sprintf("HP %.0f/%.0f   ARMOR %g", math.Max(u.HP, 0), d.HP, d.Armor)
+	if d.Shield > 0 {
+		stats = fmt.Sprintf("HP %.0f/%.0f   SHIELD %.0f/%.0f", math.Max(u.HP, 0), d.HP, u.Shield, d.Shield)
+	}
 	if d.SupplyProvided > 0 {
 		stats += fmt.Sprintf("   SUPPLY +%g", d.SupplyProvided)
 	}
@@ -218,7 +238,10 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 	}
 	if !u.Complete {
 		verb := "CONSTRUCTING"
-		if d.SelfBuild {
+		switch {
+		case d.Warped:
+			verb = "WARPING IN"
+		case d.SelfBuild:
 			verb = "GROWING"
 		}
 		bar(fmt.Sprintf("%s  %d%%", verb, int(u.BuildFrac()*100)), u.BuildFrac(), x, y+46)
@@ -239,6 +262,9 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 	if len(d.Trains) == 0 {
 		drawLeft(screen, d.Role, r.smallFace, x, y+44, colDim)
 		return
+	}
+	if v.World.Unpowered(u) {
+		drawLeft(screen, "NO POWER: summon an Anchor nearby to resume training", r.smallFace, x, y+44, colBad)
 	}
 	var pts []geom.Vec
 	var path vector.Path
@@ -318,6 +344,9 @@ func baseState(u *sim.Unit) string {
 	if u.Def.Building {
 		switch {
 		case !u.Complete:
+			if u.Def.Warped {
+				return "WARPING IN"
+			}
 			if u.Def.SelfBuild {
 				return "GROWING"
 			}
@@ -336,6 +365,8 @@ func baseState(u *sim.Unit) string {
 		return "HOLDING · FIRING"
 	case u.Hold:
 		return "HOLDING"
+	case u.HealTarget() != 0 && u.Def.ShieldHeal:
+		return "RESTORING SHIELDS"
 	case u.HealTarget() != 0:
 		return "HEALING"
 	case kind == sim.OrderGather && u.Cargo > 0, kind == sim.OrderReturn:

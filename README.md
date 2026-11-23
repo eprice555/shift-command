@@ -19,6 +19,7 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 - **M2c (Forge SHIFT modes)**: press **Shift** (or the SHIFT slot on the command card) to switch the selection's gear-shift mode; see the table below. The enemy AI uses them too: it sieges Bastions and plants Striders near enemies, overdrives Troopers into fights, boosts Outriders while travelling, and packs everything up before retreating. The enemy never relocates its buildings.
 - **M3a (The Brood core)**: the Brood is playable. On the title screen, press **Shift** to pick your faction (Forge or Brood), then press **Enter** or click to deploy. The enemy is still a Forge AI until M5.
 - **M3b (Brood SHIFT and re-morph)**: Brood units get their SHIFT abilities (Burrow, Pounce, Root, Brood Burst, Shell; see the table below) and can **re-morph** into another Brood form from the command card. Balance numbers are placeholders.
+- **M4a (The Phasebound core)**: the Phasebound is playable (press **Shift** on the title screen to cycle Forge, Brood and Phasebound). It adds shields, Drifters that summon buildings which warp in on their own, and Anchor power fields that Gates and Resonators need. The enemy is still a Forge AI. Phase SHIFT, warp-in at Anchors and Seer fusion come in M4b. Balance numbers are placeholders.
 
 The title screen still uses the M0 emblem morph to show the selected faction.
 
@@ -37,6 +38,14 @@ The title screen still uses the M0 emblem morph to show the selected faction.
 3. Brood units and buildings slowly regenerate HP. The Broodmother also heals nearby wounded allies.
 
 4. **Re-morph**: select Brood combat units and use the top row of the command card (**Q W E R T**: Biter, Leaper, Spitter, Broodmother, Behemoth). One selected unit cocoons and hatches as the new form in half its normal morph time. You pay the difference in value between the two forms (a Biter counts as half a pair); changing into a cheaper form is free but gives no refund. The unit keeps its HP fraction. **Esc** cancels the cocoon and refunds it. Drones can't re-morph from the card yet.
+
+### Playing the Phasebound
+
+1. Select the **Spire** and press **Q** to train **Drifters**. Drifters mine like Riggers.
+2. A Drifter **summons** a building (**Q W E R T**: Spire, Anchor, Extractor, Gate, Resonator). The building then **warps in on its own**, and the Drifter goes back to mining. Cancelling a warping building with **Esc** gives a 75% refund.
+3. **Anchors** give +8 supply and project a **power field** (the cyan circle shown while placing a building, or with a Drifter, Anchor, Gate or Resonator selected). Gates and Resonators must be placed inside a finished Anchor's field. If their Anchor is destroyed they show **NO POWER** and stop training until you summon a new Anchor nearby.
+4. Gates train Wardens (melee), Glints (fast raiders with bonus damage vs workers) and Seers (ranged splash). The Resonator trains Conduits and Monoliths.
+5. Every Phasebound unit and building has **shields** (the cyan bar above HP). Damage hits shields first. Shields recharge 2 per second after 7 s without taking damage. **Conduits** restore the shields of nearby allies.
 
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 
@@ -120,7 +129,7 @@ go run ./cmd/game -autoshift 20                       # title screen: press Shif
 go run ./cmd/game -match                              # skip the title, start the skirmish
 go run ./cmd/game -demo -updates 640 -screenshot fight.png   # M1 sandbox: army attack-moves into the enemy
 go run ./cmd/game -match -skip 200 -reveal                    # fast-forward 200s of AI play, fog off
-go run ./cmd/game -match -faction brood                       # play as the Brood (forge|brood)
+go run ./cmd/game -match -faction brood                       # play as the Brood (forge|brood|phasebound)
 ```
 
 ## Layout

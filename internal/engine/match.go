@@ -752,8 +752,9 @@ var debugSquads = map[faction.ID][]struct {
 	t faction.UnitType
 	n int
 }{
-	faction.Forge: {{faction.Trooper, 6}, {faction.Outrider, 4}, {faction.Strider, 3}},
-	faction.Brood: {{faction.Biter, 8}, {faction.Leaper, 4}, {faction.Spitter, 4}, {faction.Broodmother, 2}, {faction.Behemoth, 2}},
+	faction.Forge:      {{faction.Trooper, 6}, {faction.Outrider, 4}, {faction.Strider, 3}},
+	faction.Brood:      {{faction.Biter, 8}, {faction.Leaper, 4}, {faction.Spitter, 4}, {faction.Broodmother, 2}, {faction.Behemoth, 2}},
+	faction.Phasebound: {{faction.Warden, 6}, {faction.Glint, 4}, {faction.Seer, 4}, {faction.Conduit, 2}, {faction.Monolith, 2}},
 }
 
 func (m *Match) centroid(ids []sim.UnitID) geom.Vec {

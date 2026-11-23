@@ -37,7 +37,8 @@ var defs = [Count]Def{
 		HQ: CommandHub, Worker: Rigger, Supply: Generator, Extractor: Extractor, Playable: true},
 	Brood: {ID: Brood, Name: "The Brood", Shift: "Shapeshift", Color: color.RGBA{0xFF, 0x3C, 0xAC, 0xFF}, Sides: 0,
 		HQ: Hive, Worker: Drone, Supply: NestPod, Extractor: BroodExtractor, Playable: true},
-	Phasebound: {ID: Phasebound, Name: "The Phasebound", Shift: "Phase Shift", Color: color.RGBA{0x3C, 0xF0, 0xFF, 0xFF}, Sides: 3},
+	Phasebound: {ID: Phasebound, Name: "The Phasebound", Shift: "Phase Shift", Color: color.RGBA{0x3C, 0xF0, 0xFF, 0xFF}, Sides: 3,
+		HQ: Spire, Worker: Drifter, Supply: Anchor, Extractor: PhaseExtractor, Playable: true},
 }
 
 // Get returns the definition for id. It panics on an out-of-range id.
