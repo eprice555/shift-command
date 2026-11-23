@@ -20,13 +20,15 @@ func main() {
 	flag.BoolVar(&opts.Demo, "demo", false, "start the match with the army attack-moving into the enemy (implies -match)")
 	flag.IntVar(&opts.SkipSeconds, "skip", 0, "fast-forward a new match by N seconds of game time (smoke testing)")
 	flag.BoolVar(&opts.Reveal, "reveal", false, "start the match with fog of war off (smoke testing)")
-	fname := flag.String("faction", "forge", "faction to play: forge or brood")
+	fname := flag.String("faction", "forge", "faction to play: forge, brood, or phasebound")
 	flag.Parse()
 	switch *fname {
 	case "forge":
 		opts.Faction = faction.Forge
 	case "brood":
 		opts.Faction = faction.Brood
+	case "phasebound":
+		opts.Faction = faction.Phasebound
 	default:
 		log.Fatalf("unknown -faction %q", *fname)
 	}

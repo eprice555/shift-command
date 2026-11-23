@@ -184,6 +184,7 @@ func (w *World) grow(b *Unit) {
 	b.HP = min(b.Def.HP, b.HP+b.Def.HP*0.9/float64(total))
 	if b.Progress >= total {
 		b.Complete, b.Progress = true, 0
+		b.Shield = b.Def.Shield
 		w.Events = append(w.Events, Event{Kind: EvBuildingDone, Owner: b.Owner, Type: b.Type, From: b.Pos})
 	}
 }
@@ -202,6 +203,7 @@ func (w *World) regenerate() {
 		if r := u.Def.Regen; r > 0 && u.Complete && u.HP > 0 && u.HP < u.Def.HP {
 			u.HP = min(u.Def.HP, u.HP+r/TicksPerSecond)
 		}
+		w.rechargeShield(u)
 	}
 }
 

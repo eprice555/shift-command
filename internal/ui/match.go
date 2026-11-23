@@ -197,6 +197,7 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 	screen.Fill(colBackground)
 	r.drawFloor(screen, cam, vis)
 	r.drawCreep(screen, v)
+	r.drawPowerFields(screen, v)
 
 	// Walls: dark fill on screen, glowing outline in the emissive layer.
 	em := r.bloom.src
@@ -272,6 +273,7 @@ func (r *Renderer) DrawMatch(screen *ebiten.Image, v *MatchView) {
 	r.drawRally(screen, v)
 	r.drawHPBars(screen, v, vis)
 	drawBuildBars(screen, v, vis)
+	r.drawUnpowered(screen, v, vis)
 	r.drawPlacement(screen, v)
 	if v.Dragging {
 		box := geom.RectFrom(v.DragFrom, v.Cursor)
@@ -317,6 +319,9 @@ func (r *Renderer) drawFloor(screen *ebiten.Image, cam *Camera, vis geom.Rect) {
 func unitShape(dst []geom.Vec, t faction.UnitType) []geom.Vec {
 	if isBrood(t) {
 		return broodShape(dst, t)
+	}
+	if isPhase(t) {
+		return phaseShape(dst, t)
 	}
 	switch t {
 	case faction.Outrider:
@@ -397,6 +402,13 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 		}
 		sx, sy := cam.ToScreen(pos)
 		rad := u.Def.Radius * scale
+		phase := u.Def.Faction == faction.Phasebound
+		shimmer, glitch := 1.0, 0.0
+		if phase {
+			sy -= phaseBob(u.ID, r.frame, scale)
+			shimmer, glitch = phaseFlicker(u.ID, r.frame)
+			sx += glitch * rad
+		}
 		sin, cos := math.Sincos(facing)
 		at := func(q geom.Vec) (float32, float32) {
 			return float32(sx + (q.X*cos-q.Y*sin)*rad), float32(sy + (q.X*sin+q.Y*cos)*rad)
@@ -419,7 +431,7 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			if brood {
 				q = wobble(q, i, u.ID, r.frame, 0.06)
 			}
-			q = geom.V(q.X*swell*(1+0.2*(1-squash)), q.Y*swell*squash)
+			q = geom.V(q.X*swell*(1+0.2*(1-squash)), q.Y*swell*squash).Scale(shimmer)
 			x, y := at(q)
 			if i == 0 {
 				fill.MoveTo(x, y)
@@ -442,6 +454,17 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			stroke.MoveTo(x, y)
 			x, y = at(geom.V(l, 0))
 			stroke.LineTo(x, y)
+		}
+		if phase {
+			phaseDetail(func(a, b geom.Vec) {
+				x, y := at(a)
+				stroke.MoveTo(x, y)
+				x, y = at(b)
+				stroke.LineTo(x, y)
+			}, u.Type)
+			if u.Shield > 0 {
+				rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * 1.3), 1, 0.12 + 0.2*u.Shield/u.Def.Shield})
+			}
 		}
 		if frac > 0 || u.Leaping() {
 			rings = modeVisual(stroke, rings, u, frac, at, sx, sy, rad, scale, r.frame)
@@ -576,7 +599,11 @@ func (r *Renderer) drawHPBars(screen *ebiten.Image, v *MatchView, vis geom.Rect)
 			continue
 		}
 		frac := u.HP / u.Def.HP
-		if frac >= 1 && u.ID != v.Hover && !isSelected(v, u.ID) {
+		sh := 1.0
+		if u.Def.Shield > 0 {
+			sh = u.Shield / u.Def.Shield
+		}
+		if frac >= 1 && sh >= 1 && u.ID != v.Hover && !isSelected(v, u.ID) {
 			continue
 		}
 		pos, _ := DrawPos(u, v.Alpha)
@@ -588,6 +615,10 @@ func (r *Renderer) drawHPBars(screen *ebiten.Image, v *MatchView, vis geom.Rect)
 		x, y := float32(sx-w/2), float32(sy-(u.Def.Radius+0.3)*scale-5)
 		vector.FillRect(screen, x-1, y-1, float32(w)+2, 5, color.RGBA{0, 0, 0, 0xC0}, false)
 		vector.FillRect(screen, x, y, float32(w*max(frac, 0)), 3, hpColor(frac), false)
+		if u.Def.Shield > 0 {
+			vector.FillRect(screen, x-1, y-5, float32(w)+2, 4, color.RGBA{0, 0, 0, 0xC0}, false)
+			vector.FillRect(screen, x, y-4, float32(w*sh), 2, colShield, false)
+		}
 	}
 }
 

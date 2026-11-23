@@ -90,3 +90,28 @@ func TestCardCastCooldown(t *testing.T) {
 		t.Errorf("Brood Burst on cooldown: enabled %v, cooldown %v", b.Enabled, b.Cooldown)
 	}
 }
+
+func TestCardPhasebound(t *testing.T) {
+	w := sim.NewSkirmishFor([sim.NumPlayers]faction.ID{faction.Phasebound, faction.Forge})
+	var drifter, spire *sim.Unit
+	for _, u := range w.Units {
+		switch {
+		case u.Owner == 0 && u.Type == faction.Drifter:
+			drifter = u
+		case u.Owner == 0 && u.Type == faction.Spire:
+			spire = u
+		}
+	}
+	for _, typ := range []faction.UnitType{faction.Anchor, faction.PhaseExtractor, faction.Gate, faction.Resonator} {
+		b, ok := cardButton(w, ActBuild, typ, drifter.ID)
+		if !ok || b.Label == "?" {
+			t.Errorf("Drifter build %v: %+v", typ, b)
+		}
+	}
+	if b, ok := cardButton(w, ActTrain, faction.Drifter, spire.ID); !ok || b.Label != "DRIFT" {
+		t.Errorf("Spire train Drifter: %+v", b)
+	}
+	if b, _ := cardButton(w, ActBuild, faction.Gate, drifter.ID); b.Enabled {
+		t.Error("Gate should need an Anchor first")
+	}
+}

@@ -150,8 +150,32 @@ func TestBroodTechTree(t *testing.T) {
 			t.Errorf("%s: bad key types", f.Name)
 		}
 	}
-	if Forge.NextPlayable() != Brood || Brood.NextPlayable() != Forge {
-		t.Error("NextPlayable should cycle Forge <-> Brood")
+	if Forge.NextPlayable() != Brood || Brood.NextPlayable() != Phasebound || Phasebound.NextPlayable() != Forge {
+		t.Error("NextPlayable should cycle Forge -> Brood -> Phasebound")
+	}
+}
+
+func TestPhaseboundTechTree(t *testing.T) {
+	for _, d := range Units() {
+		if d.Faction != Phasebound {
+			continue
+		}
+		if d.Shield <= 0 {
+			t.Errorf("%s has no shield", d.Name)
+		}
+		if d.Building && (!d.SelfBuild || !d.Warped) {
+			t.Errorf("%s should be summoned (SelfBuild+Warped)", d.Name)
+		}
+	}
+	if !Unit(Gate).NeedsPower || !Unit(Resonator).NeedsPower || Unit(Anchor).PowerRadius <= 0 {
+		t.Error("Gate/Resonator need power from Anchors")
+	}
+	if got := Buildable(Phasebound); len(got) != 5 {
+		t.Errorf("Drifter builds %v", got)
+	}
+	g := Unit(Glint).Weapon
+	if g.DamageTo(Unit(Drifter)) <= g.DamageTo(Unit(Warden)) {
+		t.Error("Glint should do bonus damage to workers")
 	}
 }
 

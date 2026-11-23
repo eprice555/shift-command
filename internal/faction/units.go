@@ -54,6 +54,7 @@ type Weapon struct {
 	Cooldown float64 // seconds between shots
 	MinRange float64 // targets closer than this can't be hit
 	Splash   float64 // radius around the target that takes SplashShare damage
+	VsWorker float64 // bonus damage against workers
 }
 
 // SplashShare is the fraction of a shot's damage dealt to other enemies in
@@ -62,7 +63,11 @@ const SplashShare = 0.5
 
 // DamageTo returns the damage w deals to a unit with def d.
 func (w Weapon) DamageTo(d UnitDef) float64 {
-	return max(MinDamage, w.Damage*DamageMultiplier(w.Type, d.ArmorType)-d.Armor)
+	dmg := w.Damage
+	if d.Worker {
+		dmg += w.VsWorker
+	}
+	return max(MinDamage, dmg*DamageMultiplier(w.Type, d.ArmorType)-d.Armor)
 }
 
 // UnitType identifies a unit or building definition. Buildings share the
@@ -97,6 +102,19 @@ const (
 	BroodExtractor
 	SpawningPit
 	GestationDen
+
+	// The Phasebound.
+	Drifter
+	Warden
+	Glint
+	Seer
+	Conduit
+	Monolith
+	Spire
+	Anchor
+	PhaseExtractor
+	Gate
+	Resonator
 
 	UnitTypeCount
 )
@@ -133,6 +151,12 @@ type UnitDef struct {
 	HealRate  float64 // HP per second to a nearby damaged Bio ally
 	HealRange float64
 	HealAura  bool // heal every damaged Bio ally in HealRange at once
+	// ShieldHeal makes HealRate restore allies' shields instead of HP.
+	ShieldHeal bool
+
+	// Shield is the Phasebound's regenerating shield pool, which absorbs
+	// damage before HP. It recharges after ShieldDelay seconds unhurt.
+	Shield float64
 
 	// Shift is the unit's SHIFT mode, or nil if it has none.
 	Shift *Mode
@@ -159,6 +183,12 @@ type UnitDef struct {
 	NeedsCreep bool    // the whole footprint must be on its owner's creep
 	Creep      float64 // creep radius spread once complete
 	SpawnMax   int     // a Hive keeps up to this many idle Spawn
+
+	// Warped buildings are summoned: the worker starts one and walks away
+	// while it builds itself (Phasebound). Requires SelfBuild.
+	Warped      bool
+	NeedsPower  bool    // must be placed (and stay) in an Anchor's power field
+	PowerRadius float64 // power field radius once complete
 }
 
 // Yield is how many units one train/morph of d produces.
@@ -425,6 +455,77 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		Building: true, Size: 3, Requires: []UnitType{SpawningPit},
 		SelfBuild: true, NeedsCreep: true, Creep: 3,
 	},
+
+	Drifter: {
+		Type: Drifter, Faction: Phasebound, Name: "Drifter", Role: "Worker: gathers, summons buildings",
+		Crystals: 50, Supply: 1, BuildTime: 12,
+		HP: 25, Shield: 25, ArmorType: Light, Radius: 0.34, Speed: 2.8, Sight: 7, Worker: true,
+		Weapon: Weapon{Damage: 5, Type: Normal, Range: 0.2, Cooldown: 1.2},
+	},
+	Warden: {
+		Type: Warden, Faction: Phasebound, Name: "Warden", Role: "Shielded melee warrior",
+		Crystals: 100, Supply: 2, BuildTime: 24,
+		HP: 90, Shield: 60, Armor: 1, ArmorType: Light, Radius: 0.45, Speed: 2.9, Sight: 8,
+		Weapon: Weapon{Damage: 9, Type: Normal, Range: 0.3, Cooldown: 1.0},
+	},
+	Glint: {
+		Type: Glint, Faction: Phasebound, Name: "Glint", Role: "Fast raider and scout, bonus vs workers",
+		Crystals: 100, Flux: 25, Supply: 2, BuildTime: 22,
+		HP: 60, Shield: 40, ArmorType: Light, Radius: 0.4, Speed: 4.5, Sight: 10,
+		Weapon: Weapon{Damage: 6, Type: Normal, Range: 1.5, Cooldown: 0.8, VsWorker: 8},
+	},
+	Seer: {
+		Type: Seer, Faction: Phasebound, Name: "Seer", Role: "Ranged psionic bolts, bonus vs Armored",
+		Crystals: 125, Flux: 50, Supply: 2, BuildTime: 28,
+		HP: 50, Shield: 70, ArmorType: Light, Radius: 0.42, Speed: 2.6, Sight: 9,
+		Weapon: Weapon{Damage: 14, Type: Explosive, Range: 6, Cooldown: 1.6},
+	},
+	Conduit: {
+		Type: Conduit, Faction: Phasebound, Name: "Conduit", Role: "Support: restores allies' shields",
+		Crystals: 50, Flux: 150, Supply: 2, BuildTime: 30,
+		HP: 80, Shield: 80, Armor: 1, ArmorType: Armored, Radius: 0.5, Speed: 2.6, Sight: 9,
+		HealRate: 12, HealRange: 4, ShieldHeal: true,
+	},
+	Monolith: {
+		Type: Monolith, Faction: Phasebound, Name: "Monolith", Role: "Heavy ranged siege",
+		Crystals: 300, Flux: 200, Supply: 6, BuildTime: 50,
+		HP: 220, Shield: 180, Armor: 2, ArmorType: Armored, Radius: 0.9, Speed: 1.8, Sight: 10,
+		Weapon: Weapon{Damage: 32, Type: Explosive, Range: 9, Cooldown: 2.6, Splash: 1},
+	},
+	Spire: {
+		Type: Spire, Faction: Phasebound, Name: "Spire", Role: "HQ: trains Drifters, cargo drop-off",
+		Crystals: 400, BuildTime: 60,
+		HP: 1000, Shield: 1000, Armor: 1, ArmorType: Armored, Radius: 2, Sight: 10,
+		Building: true, Size: 4, SupplyProvided: 10, DropOff: true, Trains: []UnitType{Drifter},
+		SelfBuild: true, Warped: true,
+	},
+	Anchor: {
+		Type: Anchor, Faction: Phasebound, Name: "Anchor", Role: "+8 supply, powers nearby buildings",
+		Crystals: 100, BuildTime: 18,
+		HP: 200, Shield: 200, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 8,
+		Building: true, Size: 2, SupplyProvided: 8,
+		SelfBuild: true, Warped: true, PowerRadius: 6.5,
+	},
+	PhaseExtractor: {
+		Type: PhaseExtractor, Faction: Phasebound, Name: "Extractor", Role: "Harvests flux from a vent",
+		Crystals: 75, BuildTime: 20,
+		HP: 450, Shield: 450, Armor: 1, ArmorType: Armored, Radius: 1, Sight: 7,
+		Building: true, Size: 2, OnVent: true, SelfBuild: true, Warped: true,
+	},
+	Gate: {
+		Type: Gate, Faction: Phasebound, Name: "Gate", Role: "Trains Wardens, Glints, Seers",
+		Crystals: 150, BuildTime: 40,
+		HP: 500, Shield: 500, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8,
+		Building: true, Size: 3, Trains: []UnitType{Warden, Glint, Seer}, Requires: []UnitType{Anchor},
+		SelfBuild: true, Warped: true, NeedsPower: true,
+	},
+	Resonator: {
+		Type: Resonator, Faction: Phasebound, Name: "Resonator", Role: "Trains Conduits, Monoliths",
+		Crystals: 150, Flux: 150, BuildTime: 45,
+		HP: 550, Shield: 550, Armor: 1, ArmorType: Armored, Radius: 1.5, Sight: 8,
+		Building: true, Size: 3, Trains: []UnitType{Conduit, Monolith}, Requires: []UnitType{Gate},
+		SelfBuild: true, Warped: true, NeedsPower: true,
+	},
 }
 
 // Brood tuning.
@@ -434,6 +535,14 @@ const (
 	SpawnTime          = 10
 	broodUnitRegen     = 0.6
 	broodBuildingRegen = 2
+)
+
+// Phasebound tuning.
+const (
+	// ShieldDelay is how long (seconds) shields wait after damage before
+	// they recharge at ShieldRegen per second.
+	ShieldDelay = 7
+	ShieldRegen = 2
 )
 
 // broodForms is what a Spawn can morph into, in command-card order.

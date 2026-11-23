@@ -134,6 +134,28 @@ func shortName(t faction.UnitType) string {
 		return "SPAWN"
 	case faction.Mite:
 		return "MITE"
+	case faction.Spire:
+		return "SPIRE"
+	case faction.Anchor:
+		return "ANCHR"
+	case faction.PhaseExtractor:
+		return "EXTR"
+	case faction.Gate:
+		return "GATE"
+	case faction.Resonator:
+		return "RESON"
+	case faction.Drifter:
+		return "DRIFT"
+	case faction.Warden:
+		return "WARDN"
+	case faction.Glint:
+		return "GLINT"
+	case faction.Seer:
+		return "SEER"
+	case faction.Conduit:
+		return "CONDT"
+	case faction.Monolith:
+		return "MONO"
 	}
 	return "?"
 }

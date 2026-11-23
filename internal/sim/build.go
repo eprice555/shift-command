@@ -35,6 +35,7 @@ const (
 	NoticeCooldown         // SHIFT ability still recharging
 	NoticeNoTarget         // no enemy in reach for the SHIFT ability
 	NoticeSameForm         // re-morph into the form the unit already has
+	NoticeNeedPower        // Phasebound building must be in an Anchor's field
 )
 
 // String is the player-facing text for n.
@@ -70,6 +71,8 @@ func (n Notice) String() string {
 		return "No enemy in range"
 	case NoticeSameForm:
 		return "Already that form"
+	case NoticeNeedPower:
+		return "Must be placed in an Anchor's power field"
 	}
 	return ""
 }
@@ -193,6 +196,9 @@ func (w *World) siteNotice(p PlayerID, def faction.UnitDef, x, y int) Notice {
 	if def.NeedsCreep && !w.onCreep(p, def.Size, x, y) {
 		return NoticeNeedCreep
 	}
+	if def.NeedsPower && !w.PoweredAt(p, footCenter(def.Size, x, y)) {
+		return NoticeNeedPower
+	}
 	return NoticeNone
 }
 
@@ -208,7 +214,9 @@ func (w *World) PlaceBuilding(owner PlayerID, t faction.UnitType, x, y int, comp
 		Pos: geom.V(float64(x)+n/2, float64(y)+n/2),
 	}
 	u.PrevPos = u.Pos
-	if !complete {
+	if complete {
+		u.Shield = def.Shield
+	} else {
 		u.HP = def.HP * 0.1
 	}
 	w.nextID++
@@ -325,8 +333,13 @@ func (w *World) build(u *Unit, o *Order) geom.Vec {
 	w.pay(u.Owner, def)
 	b := w.PlaceBuilding(u.Owner, o.Build, o.TX, o.TY, false)
 	if def.SelfBuild {
-		// The worker morphs into the building, which grows on its own.
 		w.Events = append(w.Events, Event{Kind: EvUnitReady, Owner: u.Owner, Type: b.Type, From: b.Pos})
+		if def.Warped {
+			// Summoned: the building warps in alone and the worker leaves.
+			w.finishWork(u, nil)
+			return geom.Vec{}
+		}
+		// The worker morphs into the building, which grows on its own.
 		w.consume(u)
 		return geom.Vec{}
 	}
@@ -414,7 +427,7 @@ func (w *World) heal(u *Unit) (geom.Vec, bool) {
 	var best *Unit
 	bestD := math.Inf(1)
 	for _, o := range w.Units {
-		if o == u || o.Owner != u.Owner || !o.Def.Bio || o.HP >= o.Def.HP {
+		if o == u || o.Owner != u.Owner || !needsCare(u, o) {
 			continue
 		}
 		if d := gap(u, o); d <= reach && d < bestD {
@@ -433,7 +446,11 @@ func (w *World) heal(u *Unit) (geom.Vec, bool) {
 		return w.steer(u, best.Pos, nil), true
 	}
 	u.Facing = best.Pos.Sub(u.Pos).Angle()
-	w.hits = append(w.hits, hit{best.ID, -u.Def.HealRate / TicksPerSecond})
+	if u.Def.ShieldHeal {
+		w.charges = append(w.charges, hit{best.ID, u.Def.HealRate / TicksPerSecond})
+	} else {
+		w.hits = append(w.hits, hit{best.ID, -u.Def.HealRate / TicksPerSecond})
+	}
 	if (w.Tick+uint64(u.ID))%10 == 0 {
 		w.Events = append(w.Events, Event{Kind: EvHeal, Owner: u.Owner, Type: u.Type, From: u.Pos, To: best.Pos})
 	}
@@ -442,7 +459,7 @@ func (w *World) heal(u *Unit) (geom.Vec, bool) {
 
 // produce advances a building's production queue.
 func (w *World) produce(b *Unit) {
-	if !b.Complete || len(b.Queue) == 0 {
+	if !b.Complete || len(b.Queue) == 0 || w.Unpowered(b) {
 		return
 	}
 	t := b.Queue[0]
@@ -540,7 +557,7 @@ func (w *World) cancel(p PlayerID, b *Unit, i int) {
 	if !b.Complete {
 		w.refund(p, b.Def, CancelRefund)
 		b.HP = 0
-		if b.Def.SelfBuild {
+		if b.Def.SelfBuild && !b.Def.Warped {
 			// The Drone that became this building crawls back out.
 			d := w.Spawn(p, faction.Get(w.Players[p].Faction).Worker, b.Pos)
 			w.sendOff(d, nil)

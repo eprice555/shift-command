@@ -84,6 +84,7 @@ type World struct {
 	nextID  UnitID
 	nextRes ResourceID
 	hits    []hit
+	charges []hit // shield restoration, applied after hits
 	vel     []geom.Vec
 }
 
@@ -119,7 +120,7 @@ func (w *World) Spawn(owner PlayerID, t faction.UnitType, pos geom.Vec) *Unit {
 	pos = w.Map.ResolveCircle(w.Map.SnapPassable(pos), def.Radius)
 	u := &Unit{
 		ID: w.nextID, Owner: owner, Type: t, Def: def,
-		Pos: pos, PrevPos: pos, HP: def.HP, Complete: true,
+		Pos: pos, PrevPos: pos, HP: def.HP, Shield: def.Shield, Complete: true,
 	}
 	if owner == 1 {
 		u.Facing = math.Pi
@@ -179,6 +180,7 @@ func (w *World) Step(cmds []Command) {
 
 	w.vel = w.vel[:0]
 	w.hits = w.hits[:0]
+	w.charges = w.charges[:0]
 	for _, u := range w.Units {
 		w.vel = append(w.vel, w.think(u))
 	}
@@ -215,7 +217,12 @@ func (w *World) Step(cmds []Command) {
 	// Negative damage is healing or repair.
 	for _, h := range w.hits {
 		if t := w.byID[h.target]; t != nil && !t.consumed {
-			t.HP = min(t.HP-h.damage, max(t.HP, t.Def.HP))
+			t.HP = min(t.HP-w.absorb(t, h.damage), max(t.HP, t.Def.HP))
+		}
+	}
+	for _, h := range w.charges {
+		if t := w.byID[h.target]; t != nil {
+			t.Shield = min(t.Def.Shield, t.Shield+h.damage)
 		}
 	}
 	w.regenerate()

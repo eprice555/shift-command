@@ -52,7 +52,8 @@ type Unit struct {
 	Pos, PrevPos       geom.Vec
 	Facing, PrevFacing float64
 	HP                 float64
-	Cooldown           int // ticks until the weapon is ready
+	Shield             float64 // Phasebound shields; absorb damage first
+	Cooldown           int     // ticks until the weapon is ready
 	Orders             []Order
 	Hold               bool // hold position: fire in range, never move
 	Moving             bool // moved under its own power last tick
@@ -76,6 +77,7 @@ type Unit struct {
 	working bool   // constructing or repairing this tick
 	healing UnitID // patient this tick
 
+	hurtTick  uint64     // Tick+1 when it last took damage (shields wait)
 	mining    int        // ticks spent on the current trip's mining
 	lastRes   ResourceID // node to go back to after building or banking
 	builtTick uint64     // Tick+1 when construction last advanced
