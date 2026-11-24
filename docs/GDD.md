@@ -70,7 +70,7 @@ All names and art are original. Mechanics are inspired by StarCraft; no Blizzard
 | Behemoth | 200c/100f | 4 | Heavy melee tank (Armored) | Re-morph / **Shell** (+4 armor, −50% speed) |
 
 ### 3.3 The Phasebound (Protoss-like) — Phase Shift
-**Faction rules:** All units have **regenerating shields**. Buildings must be powered by an **Anchor** field. After researching Warp, units can **warp in** at any Anchor. **Shift = Phase**: the unit goes intangible for 2s (can't attack or be attacked, passes through units), 10s cooldown.
+**Faction rules:** All units have **regenerating shields**. Buildings must be powered by an **Anchor** field. After researching Warp at a Resonator, newly trained units **warp in** at the Anchor nearest their rally point (or production building if they have no rally). **Shift = Phase**: the unit goes intangible for 2s (can't attack or be attacked, passes through units), 10s cooldown. Phasebound variants: Warden dashes toward a nearby enemy; Glint phases for 4s and crosses cliffs; Seer blinks forward; Conduit phases nearby allies for 3s on a longer cooldown.
 
 | Building | Cost | Function | Requires |
 |---|---|---|---|
@@ -78,16 +78,19 @@ All names and art are original. Mechanics are inspired by StarCraft; no Blizzard
 | Anchor | 100c | +8 supply, power field | — |
 | Extractor | 75c | Flux vent | — |
 | Gate | 150c | Trains Warden, Glint, Seer | Anchor |
-| Resonator | 150c/150f | Trains Conduit, Monolith; Seer fusion | Gate |
+| Resonator | 150c/150f | Trains Conduits, Monoliths; researches Warp; Seer fusion | Gate |
 
 | Unit | Cost | Supply | Role | SHIFT |
 |---|---|---|---|---|
 | Drifter | 50c | 1 | Worker, *summons* buildings (doesn't stay) | Phase |
-| Warden | 100c | 2 | Melee, shields (Light) | Phase + dash |
-| Glint | 100c/25f | 2 | Fast raider/scout, bonus vs workers (Light) | **Long Phase**: 4s phase, can pass over cliffs |
-| Seer | 125c/50f | 2 | Ranged, bonus vs Armored | Phase-blink; **2 Seers fuse → Archon-like "Radiant"** (splash, huge shields) |
-| Conduit | 50c/150f | 2 | Support caster: restores shields (Armored) | **Phase Field**: all allies in radius phase out together (3s, long cooldown) |
+| Warden | 100c | 2 | Melee, shields (Light) | **Phase Dash**: dash to a nearby enemy while phased |
+| Glint | 100c/25f | 2 | Fast raider/scout, bonus vs workers (Light) | **Long Phase**: 4s phase, crosses cliffs |
+| Seer | 125c/50f | 2 | Ranged, bonus vs Armored | **Phase Blink**: blink forward; two nearby Seers fuse into a Radiant |
+| Conduit | 50c/150f | 2 | Support caster: restores shields (Armored) | **Phase Field**: nearby allies phase out together (3s, long cooldown) |
 | Monolith | 300c/200f | 6 | Heavy ranged siege (Armored) | Phase |
+| Radiant | — | 4 | Fused Seers; explosive splash and heavy shields | Phase |
+
+Warp research costs 150c/150f and takes 60s (placeholder). Warped units spend 2s materializing and cannot be targeted during that time. Radiant stats and all Phasebound ability values are balance placeholders.
 
 ## 4. AI opponent
 - Scripted **build orders** per faction (data-driven), with state machine: Expand economy → Tech → Build army → Attack at threshold → Retreat if losing.

@@ -204,7 +204,11 @@ func (w *World) Step(cmds []Command) {
 		if u.Def.Building {
 			continue
 		}
-		u.Pos = w.Map.ResolveCircle(u.Pos, u.Def.Radius)
+		if u.Type == faction.Glint && u.Phased() {
+			u.Pos = w.Map.Grid.ResolveCircleIgnoringTerrain(u.Pos, u.Def.Radius)
+		} else {
+			u.Pos = w.Map.ResolveCircle(u.Pos, u.Def.Radius)
+		}
 		if want := w.vel[i].Len(); want > 0 && u.Pos.Dist(u.PrevPos) < want*0.2 {
 			u.stuck++
 		} else {
@@ -217,6 +221,9 @@ func (w *World) Step(cmds []Command) {
 	// Negative damage is healing or repair.
 	for _, h := range w.hits {
 		if t := w.byID[h.target]; t != nil && !t.consumed {
+			if h.damage > 0 && (t.Phased() || t.WarpingIn()) {
+				continue
+			}
 			t.HP = min(t.HP-w.absorb(t, h.damage), max(t.HP, t.Def.HP))
 		}
 	}

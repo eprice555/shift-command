@@ -19,9 +19,11 @@ const (
 	ActAttack                       // attack-move targeting
 	ActStop
 	ActHold
-	ActCancel // cancel construction or the last queued unit
-	ActShift  // toggle the selection's SHIFT modes
-	ActMorph  // Brood: re-morph one selected unit into Type
+	ActCancel   // cancel construction or the last queued unit
+	ActShift    // toggle the selection's SHIFT modes
+	ActMorph    // Brood: re-morph one selected unit into Type
+	ActFuse     // Phasebound: fuse two Seers into a Radiant
+	ActResearch // Phasebound: research warp-in at Anchors
 )
 
 // Command card layout: two rows of five buttons.
@@ -60,6 +62,7 @@ type Button struct {
 	Crystals, Flux int
 	// Cooldown is the seconds until a SHIFT ability is ready again.
 	Cooldown float64
+	Progress float64
 }
 
 // CardRect returns the command card's screen rect.
@@ -156,6 +159,8 @@ func shortName(t faction.UnitType) string {
 		return "CONDT"
 	case faction.Monolith:
 		return "MONO"
+	case faction.Radiant:
+		return "RADNT"
 	}
 	return "?"
 }
@@ -182,6 +187,7 @@ func availability(w *sim.World, p sim.PlayerID, t faction.UnitType) (bool, strin
 func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 	var units []*sim.Unit
 	worker, mobile, armed := false, false, false
+	var seers []*sim.Unit
 	// spawn: every mobile unit is an idle Spawn; cocoon: some are morphing;
 	// larva: every mobile unit is a Spawn or cocoon.
 	spawn, cocoon, larva := true, false, true
@@ -203,6 +209,9 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 			mobile = true
 			worker = worker || u.Def.Worker
 			armed = armed || u.Def.Armed()
+			if u.Type == faction.Seer && u.Complete && !u.Morphing() && !u.Shifting() && !u.Leaping() && !u.Phased() && !u.WarpingIn() {
+				seers = append(seers, u)
+			}
 			spawn = spawn && u.Def.Morphs && !u.Morphing()
 			cocoon = cocoon || u.Morphing()
 			larva = larva && u.Def.Morphs
@@ -238,6 +247,21 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 			slot(1, 4, ActCancel, 0, "CANCEL")
 		}
 	case mobile:
+		if len(seers) >= 2 {
+			nearby := false
+			for i, a := range seers {
+				for _, b := range seers[i+1:] {
+					nearby = nearby || a.Pos.Dist(b.Pos) <= 3
+				}
+			}
+			b := Button{Kind: ActFuse, Type: faction.Radiant, Row: 0, Col: 0, Key: cardKeys[0][0], Label: "FUSE", Enabled: nearby}
+			if req, missing := w.Missing(p, faction.Radiant); missing {
+				b.Enabled, b.Reason = false, "Requires "+faction.Unit(req).Name
+			} else if !nearby {
+				b.Reason = "Select two Seers within 3 tiles"
+			}
+			out = append(out, b)
+		}
 		if army && !worker {
 			for i, t := range remorphForms {
 				out = append(out, morphButton(w, p, units, t, i))
@@ -275,6 +299,33 @@ func CommandCard(w *sim.World, p sim.PlayerID, sel []sim.UnitID) []Button {
 		}
 		if !building.Complete || len(building.Queue) > 0 {
 			slot(1, 4, ActCancel, 0, "CANCEL")
+		}
+		if building.WarpResearching() {
+			slot(1, 4, ActCancel, 0, "CANCEL")
+		}
+		if building.Type == faction.Resonator && !w.Players[p].WarpResearched {
+			b := Button{Kind: ActResearch, Type: faction.Resonator, Row: 0, Col: 2, Key: cardKeys[0][2], Label: "WARP",
+				Crystals: faction.WarpResearchCrystals, Flux: faction.WarpResearchFlux}
+			switch {
+			case building.WarpResearching():
+				b.Label, b.Progress, b.Reason = "RESEARCH", building.WarpResearchFrac(), "Warp research in progress"
+				if w.Unpowered(building) {
+					b.Reason = "No power; research paused"
+				}
+			case !building.Complete:
+				b.Enabled, b.Reason = false, "Resonator must be complete"
+			case w.Unpowered(building):
+				b.Enabled, b.Reason = false, "Requires power"
+			case len(building.Queue) > 0:
+				b.Enabled, b.Reason = false, "Finish production first"
+			case w.Players[p].Crystals < b.Crystals:
+				b.Enabled, b.Reason = false, sim.NoticeCrystals.String()
+			case w.Players[p].Flux < b.Flux:
+				b.Enabled, b.Reason = false, sim.NoticeFlux.String()
+			default:
+				b.Enabled = true
+			}
+			out = append(out, b)
 		}
 	}
 	if b, ok := shiftButton(units, !mobile); ok {
@@ -330,6 +381,8 @@ var modeLabels = map[string]string{
 	"Field Post": "POST", "Mobile": "MOBILE",
 	"Artillery": "ARTY", "Tank": "TANK",
 	"Packed": "PACK", "Landed": "LAND",
+	"Phase": "PHASE", "Phase Dash": "DASH", "Long Phase": "LONG",
+	"Phase Blink": "BLINK", "Phase Field": "FIELD",
 }
 
 // shiftButton returns the SHIFT slot for the selection, labeled with the

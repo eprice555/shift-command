@@ -155,8 +155,8 @@ func (r *Renderer) drawPanel(screen *ebiten.Image, v *MatchView, box geom.Rect) 
 			}
 		case faction.Phasebound:
 			help = [2]string{
-				"Drifters summon buildings (Q-T) that warp in on their own.",
-				"Gates need an Anchor's power field. Shields recharge.",
+				"Drifters summon buildings (Q-T). Phasebound SHIFT phases.",
+				"Power Gates with Anchors; research Warp at a Resonator.",
 			}
 		}
 		drawLeft(screen, help[0], r.smallFace, x, y+26, colDim)
@@ -298,6 +298,8 @@ func (r *Renderer) drawBuildingPanel(screen *ebiten.Image, v *MatchView, u *sim.
 	q0 := QueueSlotRect(box, sim.MaxQueue)
 	if len(u.Queue) > 0 {
 		bar(fmt.Sprintf("TRAINING %s  %d%%", strings.ToUpper(faction.Unit(u.Queue[0]).Name), int(u.TrainFrac()*100)), u.TrainFrac(), q0.Min.X+10, q0.Min.Y+8)
+	} else if u.WarpResearching() {
+		bar(fmt.Sprintf("RESEARCHING WARP  %d%%", int(u.WarpResearchFrac()*100)), u.WarpResearchFrac(), x, y+66)
 	} else {
 		drawLeft(screen, "Press "+cardKeys[0][0]+" to train · right-click sets rally", r.smallFace, q0.Min.X+10, q0.Min.Y+20, colDim)
 	}
@@ -308,11 +310,20 @@ func unitState(u *sim.Unit) string {
 	if u.Morphing() {
 		return fmt.Sprintf("MORPHING INTO %s · %d%%", strings.ToUpper(faction.Unit(u.Queue[0]).Name), int(u.MorphFrac()*100))
 	}
+	if u.WarpingIn() {
+		return fmt.Sprintf("WARPING IN · %d%%", int(u.WarpFrac()*100))
+	}
 	m := faction.Unit(u.Type).Shift
 	switch {
 	case u.LifeLeft() > 0:
 		return fmt.Sprintf("FADES IN %.0fs · %s", math.Ceil(u.LifeLeft()), baseState(u))
+	case u.WarpResearching():
+		return fmt.Sprintf("RESEARCHING WARP · %d%%", int(u.WarpResearchFrac()*100))
 	case m == nil:
+	case u.Dashing():
+		return "PHASE DASH · " + baseState(u)
+	case u.Phased():
+		return fmt.Sprintf("PHASED %.1fs · %s", u.PhaseLeft(), baseState(u))
 	case u.Leaping():
 		return "POUNCING!"
 	case m.Cast() && u.CastLeft() > 0:
@@ -351,6 +362,8 @@ func baseState(u *sim.Unit) string {
 				return "GROWING"
 			}
 			return "UNDER CONSTRUCTION"
+		case u.WarpResearching():
+			return fmt.Sprintf("RESEARCHING WARP · %d%%", int(u.WarpResearchFrac()*100))
 		case len(u.Queue) > 0:
 			return fmt.Sprintf("TRAINING · %d QUEUED", len(u.Queue))
 		}
@@ -432,6 +445,17 @@ func (r *Renderer) drawCard(screen *ebiten.Image, v *MatchView, card geom.Rect) 
 			}
 			drawCentered(screen, costText(faction.Unit(bt.Type)), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
 		}
+		if bt.Kind == ActResearch {
+			c := colCrystal
+			if !bt.Enabled {
+				c = colDim
+			}
+			if bt.Progress > 0 {
+				drawCentered(screen, fmt.Sprintf("%.0f%%", bt.Progress*100), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
+			} else {
+				drawCentered(screen, costText(faction.UnitDef{Crystals: bt.Crystals, Flux: bt.Flux}), r.smallFace, b.Min.X+b.W()/2, b.Min.Y+38, c)
+			}
+		}
 		if bt.Kind == ActMorph && (bt.Enabled || bt.Crystals+bt.Flux > 0) {
 			c := colCrystal
 			if !bt.Enabled {
@@ -505,6 +529,24 @@ func (r *Renderer) drawTooltip(screen *ebiten.Image, bt Button, card geom.Rect) 
 		add(fmt.Sprintf("%s · %gs", cost, d.BuildTime/2), colCrystal)
 		add("One selected unit cocoons and hatches as a "+d.Name, colDim)
 		add("Pays the difference in value; cheaper forms are free", colDim)
+		if bt.Reason != "" {
+			add(bt.Reason, colBad)
+		}
+	case ActFuse:
+		add(fmt.Sprintf("FUSE SEERS  [%s]", bt.Key), colText)
+		add("Combine two nearby Seers into a Radiant", colDim)
+		add("Requires a completed Resonator", colDim)
+		add("Radiant keeps the pair's current HP and shields", colDim)
+		if bt.Reason != "" {
+			add(bt.Reason, colBad)
+		}
+	case ActResearch:
+		add(fmt.Sprintf("RESEARCH WARP  [%s]", bt.Key), colText)
+		add(fmt.Sprintf("%d crystals · %d flux · %ds", bt.Crystals, bt.Flux, faction.WarpResearchTime), colCrystal)
+		add("Phasebound units warp in beside an Anchor", colDim)
+		if bt.Progress > 0 {
+			add(fmt.Sprintf("Progress: %d%%", int(bt.Progress*100)), colDim)
+		}
 		if bt.Reason != "" {
 			add(bt.Reason, colBad)
 		}

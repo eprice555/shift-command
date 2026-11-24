@@ -30,6 +30,7 @@ const (
 type Player struct {
 	Faction        faction.ID
 	Crystals, Flux int
+	WarpResearched bool
 	// Supply is used plus reserved (queued) supply; SupplyCap is what
 	// completed buildings provide, capped at faction.MaxSupply.
 	Supply, SupplyCap float64

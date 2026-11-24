@@ -25,10 +25,6 @@ type remorph struct {
 	crystals, flux int
 }
 
-// Hidden reports whether u is burrowed (fully underground), so enemies
-// can't see or target it.
-func (u *Unit) Hidden() bool { return u.Def.Burrowed && u.shifting == 0 }
-
 // Leaping reports whether u is mid-Pounce.
 func (u *Unit) Leaping() bool { return u.leapTo != 0 }
 
@@ -166,6 +162,10 @@ func (w *World) cast(u *Unit, m *faction.Mode) Notice {
 		return NoticeCooldown
 	}
 	switch {
+	case m.PhaseDuration > 0:
+		if n := w.castPhase(u, m); n != NoticeNone {
+			return n
+		}
 	case m.Leap > 0:
 		t := w.pounceTarget(u, m.Leap)
 		if t == nil {
@@ -232,6 +232,25 @@ func (w *World) leap(u *Unit) geom.Vec {
 	return d.Scale(step / d.Len())
 }
 
+// dash moves a Phasebound Warden rapidly toward its selected enemy.
+func (w *World) dash(u *Unit) geom.Vec {
+	t := w.byID[u.dashTo]
+	u.dashLeft--
+	if t == nil || t.HP <= 0 || u.dashLeft <= 0 {
+		u.dashTo = 0
+		return geom.Vec{}
+	}
+	d := t.Pos.Sub(u.Pos)
+	u.Facing = d.Angle()
+	step := 12 / float64(TicksPerSecond)
+	if gap(u, t) <= u.Def.Weapon.Range+step {
+		u.dashTo = 0
+		u.target = t.ID
+		return geom.Vec{}
+	}
+	return d.Scale(min(step, d.Len()) / d.Len())
+}
+
 // summon spawns n units of type t in a ring around u. They join u's fight
 // if it has one.
 func (w *World) summon(u *Unit, t faction.UnitType, n int) {
@@ -250,11 +269,14 @@ func (w *World) summon(u *Unit, t faction.UnitType, n int) {
 	}
 }
 
-// tickBrood advances cast cooldowns and summon lifetimes. It reports
-// whether u expired this tick.
-func (w *World) tickBrood(u *Unit) bool {
+// tickAbilities advances cast cooldowns, phase durations, and summon
+// lifetimes. It reports whether u expired this tick.
+func (w *World) tickAbilities(u *Unit) bool {
 	if u.castCD > 0 {
 		u.castCD--
+	}
+	if u.phaseLeft > 0 {
+		u.phaseLeft--
 	}
 	if u.life > 0 {
 		u.life--

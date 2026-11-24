@@ -476,6 +476,18 @@ func (m *Match) press(b ui.Button) {
 			return
 		}
 		m.issue(sim.Command{Kind: sim.CmdMorph, Units: own, Type: b.Type})
+	case ui.ActFuse:
+		if !b.Enabled {
+			m.say(b.Reason)
+			return
+		}
+		m.issue(sim.Command{Kind: sim.CmdFuse, Units: own})
+	case ui.ActResearch:
+		if !b.Enabled {
+			m.say(b.Reason)
+			return
+		}
+		m.issue(sim.Command{Kind: sim.CmdResearchWarp, Units: own})
 	}
 }
 

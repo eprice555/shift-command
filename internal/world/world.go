@@ -133,12 +133,22 @@ func (g *Grid) SnapPassable(p geom.Vec) geom.Vec {
 // ResolveCircle pushes a circle at p with radius r out of blocked tiles and
 // the map edge, returning the corrected center.
 func (g *Grid) ResolveCircle(p geom.Vec, r float64) geom.Vec {
+	return g.resolveCircle(p, r, false)
+}
+
+// ResolveCircleIgnoringTerrain resolves a body against map edges and placed
+// buildings, but lets it pass through static terrain.
+func (g *Grid) ResolveCircleIgnoringTerrain(p geom.Vec, r float64) geom.Vec {
+	return g.resolveCircle(p, r, true)
+}
+
+func (g *Grid) resolveCircle(p geom.Vec, r float64, ignoreTerrain bool) geom.Vec {
 	p = g.Clamp(p, r)
 	for range 2 {
 		cx, cy := TileOf(p)
 		for ty := cy - 1; ty <= cy+1; ty++ {
 			for tx := cx - 1; tx <= cx+1; tx++ {
-				if !g.InBounds(tx, ty) || !g.Blocked(tx, ty) {
+				if !g.InBounds(tx, ty) || (ignoreTerrain && !g.Occupied(tx, ty)) || (!ignoreTerrain && !g.Blocked(tx, ty)) {
 					continue
 				}
 				// Closest point on the tile's box to p.

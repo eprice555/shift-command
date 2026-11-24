@@ -19,7 +19,8 @@ The full design is in [docs/GDD.md](docs/GDD.md).
 - **M2c (Forge SHIFT modes)**: press **Shift** (or the SHIFT slot on the command card) to switch the selection's gear-shift mode; see the table below. The enemy AI uses them too: it sieges Bastions and plants Striders near enemies, overdrives Troopers into fights, boosts Outriders while travelling, and packs everything up before retreating. The enemy never relocates its buildings.
 - **M3a (The Brood core)**: the Brood is playable. On the title screen, press **Shift** to pick your faction (Forge or Brood), then press **Enter** or click to deploy. The enemy is still a Forge AI until M5.
 - **M3b (Brood SHIFT and re-morph)**: Brood units get their SHIFT abilities (Burrow, Pounce, Root, Brood Burst, Shell; see the table below) and can **re-morph** into another Brood form from the command card. Balance numbers are placeholders.
-- **M4a (The Phasebound core)**: the Phasebound is playable (press **Shift** on the title screen to cycle Forge, Brood and Phasebound). It adds shields, Drifters that summon buildings which warp in on their own, and Anchor power fields that Gates and Resonators need. The enemy is still a Forge AI. Phase SHIFT, warp-in at Anchors and Seer fusion come in M4b. Balance numbers are placeholders.
+- **M4a (The Phasebound core)**: the Phasebound is playable (press **Shift** on the title screen to cycle Forge, Brood and Phasebound). It adds shields, Drifters that summon buildings which warp in on their own, and Anchor power fields that Gates and Resonators need.
+- **M4b (Phasebound SHIFT)**: Phasebound units can phase out; Wardens dash, Glints cross cliffs, Seers blink, and Conduits phase nearby allies. Research Warp at a Resonator to warp newly trained units beside an Anchor. Fuse two nearby Seers into a Radiant. Stats and research costs are placeholders. The enemy is still a Forge AI.
 
 The title screen still uses the M0 emblem morph to show the selected faction.
 
@@ -46,6 +47,9 @@ The title screen still uses the M0 emblem morph to show the selected faction.
 3. **Anchors** give +8 supply and project a **power field** (the cyan circle shown while placing a building, or with a Drifter, Anchor, Gate or Resonator selected). Gates and Resonators must be placed inside a finished Anchor's field. If their Anchor is destroyed they show **NO POWER** and stop training until you summon a new Anchor nearby.
 4. Gates train Wardens (melee), Glints (fast raiders with bonus damage vs workers) and Seers (ranged splash). The Resonator trains Conduits and Monoliths.
 5. Every Phasebound unit and building has **shields** (the cyan bar above HP). Damage hits shields first. Shields recharge 2 per second after 7 s without taking damage. **Conduits** restore the shields of nearby allies.
+6. Press **Shift** or the SHIFT card button to phase selected units. Phase makes them untargetable and lets them pass through units, but they cannot attack until it ends. Wardens dash toward a nearby enemy; Glints phase for 4 s and can cross cliffs; Seers blink forward; Conduits phase allies within 4 tiles for 3 s. These abilities have cooldowns.
+7. After you build a powered **Resonator**, press **E** on its command card to research Warp (150 Crystals, 150 Flux, 60 s). While research is underway, the Resonator pauses training. Once complete, newly trained Phasebound units warp in beside the Anchor nearest their rally point (or production building if they have no rally), taking 2 s to arrive. Existing units are unchanged.
+8. Select two Seers within 3 tiles and press **Q** or **FUSE** to combine them into a **Radiant**. Fusion is free and preserves their current combined HP and shields, up to the Radiant's maximum.
 
 The resource bar (top right) shows Crystals, Flux and Supply. Hover a command-card button to see its cost, requirements, and why it is disabled.
 

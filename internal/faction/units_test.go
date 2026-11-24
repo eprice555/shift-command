@@ -60,7 +60,8 @@ func TestUnitDefsSane(t *testing.T) {
 			}
 			continue
 		}
-		if d.Name == "" || d.HP <= 0 || d.Radius <= 0 || d.Sight <= 0 || d.BuildTime <= 0 || d.Crystals <= 0 {
+		if d.Name == "" || d.HP <= 0 || d.Radius <= 0 || d.Sight <= 0 ||
+			(d.BuildTime <= 0 || d.Crystals <= 0) && d.Type != Radiant {
 			t.Errorf("%s: bad stats %+v", d.Name, d)
 		}
 		if d.Building {
@@ -82,6 +83,9 @@ func TestUnitDefsSane(t *testing.T) {
 		}
 		if !d.Armed() && d.HealRate <= 0 {
 			t.Errorf("%s: neither armed nor a healer", d.Name)
+		}
+		if d.Type == Radiant {
+			continue
 		}
 		if _, ok := TrainedAt(d.Type); !ok {
 			t.Errorf("%s: no building trains it", d.Name)
@@ -163,6 +167,9 @@ func TestPhaseboundTechTree(t *testing.T) {
 		if d.Shield <= 0 {
 			t.Errorf("%s has no shield", d.Name)
 		}
+		if !d.Building && (d.Shift == nil || d.Shift.PhaseDuration == 0) {
+			t.Errorf("%s should have a Phase SHIFT ability", d.Name)
+		}
 		if d.Building && (!d.SelfBuild || !d.Warped) {
 			t.Errorf("%s should be summoned (SelfBuild+Warped)", d.Name)
 		}
@@ -176,6 +183,10 @@ func TestPhaseboundTechTree(t *testing.T) {
 	g := Unit(Glint).Weapon
 	if g.DamageTo(Unit(Drifter)) <= g.DamageTo(Unit(Warden)) {
 		t.Error("Glint should do bonus damage to workers")
+	}
+	if Unit(Warden).Shift.DashRange == 0 || !Unit(Glint).Shift.LongPhase ||
+		Unit(Seer).Shift.BlinkRange == 0 || Unit(Conduit).Shift.PhaseRadius == 0 {
+		t.Error("Phasebound unit variants are missing their unique phase ability")
 	}
 }
 
