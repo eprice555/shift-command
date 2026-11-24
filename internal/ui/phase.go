@@ -114,9 +114,26 @@ func phaseBuilding(fill, stroke *vector.Path, t faction.UnitType, rect geom.Rect
 	poly(stroke, outer...)
 	switch t {
 	case faction.Spire:
-		poly(stroke, ngon(c, s*0.3, 3, -math.Pi/2)...)
-		poly(stroke, ngon(c, s*0.3, 3, math.Pi/2)...)
-		poly(stroke, ngon(c, s*0.08, 10, wob*0.2)...)
+		// Obelisk: a faceted crystal shaft with a ring orbiting its waist.
+		top, bot := c.Add(geom.V(0, -s*0.4)), c.Add(geom.V(0, s*0.4))
+		l, r := c.Add(geom.V(-s*0.08, -s*0.06)), c.Add(geom.V(s*0.08, -s*0.06))
+		poly(stroke, top, r, bot, l)
+		line(stroke, top, bot)
+		// The ring is a tilted ellipse spinning about the shaft; its three
+		// nodes travel around it so the rotation reads at a glance.
+		waist := c.Add(geom.V(0, s*0.04))
+		onRing := func(a float64) geom.Vec {
+			sn, cs := math.Sincos(a)
+			return waist.Add(geom.V(cs*s*0.24, sn*s*0.07))
+		}
+		ring := make([]geom.Vec, 20)
+		for i := range ring {
+			ring[i] = onRing(float64(i) * 2 * math.Pi / float64(len(ring)))
+		}
+		poly(stroke, ring...)
+		for k := range 3 {
+			poly(stroke, ngon(onRing(wob*0.6+float64(k)*2*math.Pi/3), s*0.035, 4, 0)...)
+		}
 	case faction.Anchor:
 		poly(stroke, ngon(c, s*0.28, 3, -math.Pi/2+wob*0.15)...)
 		poly(stroke, ngon(c, s*0.07, 8, 0)...)
