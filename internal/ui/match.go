@@ -408,6 +408,9 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			sy -= phaseBob(u.ID, r.frame, scale)
 			shimmer, glitch = phaseFlicker(u.ID, r.frame)
 			sx += glitch * rad
+			if u.WarpingIn() {
+				shimmer *= 0.3 + 0.7*u.WarpFrac()
+			}
 		}
 		sin, cos := math.Sincos(facing)
 		at := func(q geom.Vec) (float32, float32) {
@@ -464,6 +467,12 @@ func (r *Renderer) drawUnits(screen, em *ebiten.Image, v *MatchView, vis geom.Re
 			}, u.Type)
 			if u.Shield > 0 {
 				rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * 1.3), 1, 0.12 + 0.2*u.Shield/u.Def.Shield})
+			}
+			if u.Phased() {
+				rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * (1.45 + 0.1*math.Sin(float64(r.frame)*0.1))), 2, 0.48})
+			}
+			if u.WarpingIn() {
+				rings = append(rings, ring{u.Owner, float32(sx), float32(sy), float32(rad * (1 + u.WarpFrac())), 1.5, 0.2 + 0.35*u.WarpFrac()})
 			}
 		}
 		if frac > 0 || u.Leaping() {

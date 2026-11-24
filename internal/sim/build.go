@@ -36,6 +36,7 @@ const (
 	NoticeNoTarget         // no enemy in reach for the SHIFT ability
 	NoticeSameForm         // re-morph into the form the unit already has
 	NoticeNeedPower        // Phasebound building must be in an Anchor's field
+	NoticeNeedSeers        // fusion requires two nearby Seers
 )
 
 // String is the player-facing text for n.
@@ -58,7 +59,7 @@ func (n Notice) String() string {
 	case NoticeLowHP:
 		return "Not enough HP to Overdrive"
 	case NoticeBusy:
-		return "Finish or cancel production before packing up"
+		return "Finish or cancel the current work first"
 	case NoticeCantLand:
 		return "Can't land here"
 	case NoticeNeedCreep:
@@ -73,6 +74,8 @@ func (n Notice) String() string {
 		return "Already that form"
 	case NoticeNeedPower:
 		return "Must be placed in an Anchor's power field"
+	case NoticeNeedSeers:
+		return "Select two nearby Seers"
 	}
 	return ""
 }
@@ -476,7 +479,12 @@ func (w *World) produce(b *Unit) {
 	if b.HasRally {
 		toward = b.Rally
 	}
-	nu := w.Spawn(b.Owner, t, w.approach(toward, def.Radius, b.Rect()))
+	var nu *Unit
+	if b.Def.Faction == faction.Phasebound && w.Players[b.Owner].WarpResearched {
+		nu = w.warpTrainedUnit(b, t)
+	} else {
+		nu = w.Spawn(b.Owner, t, w.approach(toward, def.Radius, b.Rect()))
+	}
 	w.Events = append(w.Events, Event{Kind: EvUnitReady, Owner: b.Owner, Type: t, From: nu.Pos})
 	w.sendOff(nu, b)
 }
@@ -552,6 +560,12 @@ func trains(d faction.UnitDef, t faction.UnitType) bool {
 // entry i (-1 for the last) with a full refund.
 func (w *World) cancel(p PlayerID, b *Unit, i int) {
 	if !b.Def.Building && !b.Morphing() {
+		return
+	}
+	if b.warpResearch > 0 {
+		cost := faction.UnitDef{Crystals: faction.WarpResearchCrystals, Flux: faction.WarpResearchFlux}
+		w.refund(p, cost, CancelRefund)
+		b.Progress, b.warpResearch = 0, 0
 		return
 	}
 	if !b.Complete {

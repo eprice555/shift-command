@@ -34,6 +34,8 @@ func phaseShape(dst []geom.Vec, t faction.UnitType) []geom.Vec {
 		return ngonPts(dst, 0.9, 10, 0)
 	case faction.Monolith:
 		return append(dst, geom.V(1.1, 0), geom.V(0.35, 0.8), geom.V(-0.7, 0.62), geom.V(-1, 0), geom.V(-0.7, -0.62), geom.V(0.35, -0.8))
+	case faction.Radiant:
+		return append(dst, geom.V(1.15, 0), geom.V(0.5, 0.5), geom.V(0, 1.1), geom.V(-0.5, 0.5), geom.V(-1.15, 0), geom.V(-0.5, -0.5), geom.V(0, -1.1), geom.V(0.5, -0.5))
 	}
 	return ngonPts(dst, 0.8, 3, 0)
 }
@@ -65,6 +67,11 @@ func phaseDetail(seg func(a, b geom.Vec), t faction.UnitType) {
 	case faction.Monolith:
 		seg(geom.V(0.7, 0), geom.V(-0.6, 0))
 		seg(geom.V(0.1, 0.45), geom.V(0.1, -0.45))
+	case faction.Radiant:
+		seg(geom.V(0, 0.75), geom.V(0, -0.75))
+		seg(geom.V(-0.75, 0), geom.V(0.75, 0))
+		seg(geom.V(-0.42, -0.42), geom.V(0.42, 0.42))
+		seg(geom.V(-0.42, 0.42), geom.V(0.42, -0.42))
 	}
 }
 

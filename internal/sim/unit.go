@@ -100,11 +100,17 @@ type Unit struct {
 	creepR   float64 // creep radius spread so far
 	consumed bool    // Drone that became a building: removed without a death
 
-	castCD   int      // ticks until the SHIFT ability can be cast again
-	leapTo   UnitID   // Pounce target while leaping
-	leapLeft int      // ticks before an unfinished leap gives up
-	life     int      // summoned unit: ticks until it expires (0 = never)
-	remorph  *remorph // cocoon re-morphing from another form
+	castCD       int      // ticks until the SHIFT ability can be cast again
+	leapTo       UnitID   // Pounce target while leaping
+	leapLeft     int      // ticks before an unfinished leap gives up
+	dashTo       UnitID   // Phase Dash target
+	dashLeft     int      // ticks before an unfinished dash gives up
+	phaseLeft    int      // ticks left while intangible
+	warpIn       int      // ticks left before a warped unit can act
+	warpTotal    int      // total warp-in duration for presentation
+	warpResearch int      // Resonator ticks left on Warp research
+	life         int      // summoned unit: ticks until it expires (0 = never)
+	remorph      *remorph // cocoon re-morphing from another form
 }
 
 // Target returns the unit this one is currently fighting, or 0.
@@ -179,10 +185,14 @@ func (w *World) think(u *Unit) geom.Vec {
 		u.Cooldown--
 	}
 	u.firing, u.working = false, false
-	if w.tickBrood(u) {
+	if w.tickAbilities(u) {
 		return geom.Vec{}
 	}
 	if w.tickShift(u) {
+		return geom.Vec{}
+	}
+	if u.warpIn > 0 {
+		u.warpIn--
 		return geom.Vec{}
 	}
 	if u.Def.Building {
@@ -191,6 +201,12 @@ func (w *World) think(u *Unit) geom.Vec {
 		}
 		if !u.Complete && u.Def.SelfBuild {
 			w.grow(u)
+		}
+		if u.warpResearch > 0 {
+			if !w.Unpowered(u) {
+				w.researchWarpTick(u)
+			}
+			return geom.Vec{}
 		}
 		if u.Mode == 0 {
 			w.produce(u)
@@ -207,6 +223,9 @@ func (w *World) think(u *Unit) geom.Vec {
 		w.morph(u)
 		return geom.Vec{}
 	}
+	if u.dashTo != 0 {
+		return w.dash(u)
+	}
 	if u.leapTo != 0 {
 		return w.leap(u)
 	}
@@ -221,6 +240,9 @@ func (w *World) think(u *Unit) geom.Vec {
 			continue
 		}
 		u.target = t.ID
+		if u.Phased() {
+			return w.steer(u, t.Pos, nil)
+		}
 		return w.engage(u, t, true)
 	}
 
@@ -253,7 +275,9 @@ func (w *World) think(u *Unit) geom.Vec {
 		u.healing = 0
 	}
 	// Workers only fight when told to (attack order or attack-move).
-	if (o == nil && !u.Def.Worker || o != nil && o.Kind == OrderAttackMove) && u.Def.Armed() {
+	if u.Phased() {
+		u.target = 0
+	} else if (o == nil && !u.Def.Worker || o != nil && o.Kind == OrderAttackMove) && u.Def.Armed() {
 		if t := w.byID[u.target]; t == nil || !w.VisibleTo(u.Owner, t) || (u.pinned() && !inReach(u, t)) {
 			u.target = 0
 		}
@@ -394,6 +418,13 @@ func (w *World) touchingArrived(u *Unit, g *moveGroup) bool {
 // given and usable, else a cached A* path.
 func (w *World) steer(u *Unit, goal geom.Vec, flow *world.FlowField) geom.Vec {
 	speed := u.Def.Speed / TicksPerSecond
+	if u.Type == faction.Glint && u.Phased() {
+		d := goal.Sub(u.Pos)
+		if d.Len() <= speed {
+			return d
+		}
+		return d.Scale(speed / d.Len())
+	}
 	r := u.Def.Radius
 	next, ok := geom.Vec{}, false
 	if flow != nil && flow.Reachable(u.Pos) {

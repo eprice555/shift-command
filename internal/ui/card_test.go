@@ -115,3 +115,41 @@ func TestCardPhasebound(t *testing.T) {
 		t.Error("Gate should need an Anchor first")
 	}
 }
+
+func TestCardPhaseboundShiftResearchAndFuse(t *testing.T) {
+	w := sim.NewSkirmishFor([sim.NumPlayers]faction.ID{faction.Phasebound, faction.Forge})
+	w.Players[0].Crystals, w.Players[0].Flux = 1000, 1000
+	seerA := w.Spawn(0, faction.Seer, geom.V(12, 12))
+	seerB := w.Spawn(0, faction.Seer, geom.V(13, 12))
+	if b, ok := cardButton(w, ActShift, 0, seerA.ID); !ok || !b.Enabled || b.Label != "BLINK" {
+		t.Errorf("Seer phase button: %+v, exists %v", b, ok)
+	}
+	if b, ok := cardButton(w, ActFuse, faction.Radiant, seerA.ID, seerB.ID); !ok || b.Enabled || b.Reason != "Requires Resonator" {
+		t.Errorf("Seer fusion without Resonator: %+v, exists %v", b, ok)
+	}
+
+	anchor := w.Spawn(0, faction.Anchor, geom.V(22, 20))
+	resonator := w.Spawn(0, faction.Resonator, geom.V(26, 20))
+	if b, ok := cardButton(w, ActFuse, faction.Radiant, seerA.ID, seerB.ID); !ok || !b.Enabled || b.Label != "FUSE" {
+		t.Errorf("Seer fusion button: %+v, exists %v", b, ok)
+	}
+	b, ok := cardButton(w, ActResearch, faction.Resonator, resonator.ID)
+	if !ok || !b.Enabled || b.Crystals != faction.WarpResearchCrystals || b.Flux != faction.WarpResearchFlux {
+		t.Errorf("Warp research button: %+v, exists %v", b, ok)
+	}
+	w.Step([]sim.Command{{Kind: sim.CmdResearchWarp, Player: 0, Units: []sim.UnitID{resonator.ID}}})
+	b, ok = cardButton(w, ActResearch, faction.Resonator, resonator.ID)
+	if !ok || b.Enabled || b.Progress <= 0 {
+		t.Errorf("researching Warp card: %+v, exists %v", b, ok)
+	}
+	if _, ok := cardButton(w, ActCancel, 0, resonator.ID); !ok {
+		t.Error("Warp research can't be cancelled from the card")
+	}
+	progress := resonator.WarpResearchFrac()
+	anchor.Complete = false
+	w.Step(nil)
+	b, _ = cardButton(w, ActResearch, faction.Resonator, resonator.ID)
+	if b.Reason != "No power; research paused" || resonator.WarpResearchFrac() != progress {
+		t.Errorf("unpowered research state: button %+v, progress %.3f -> %.3f", b, progress, resonator.WarpResearchFrac())
+	}
+}

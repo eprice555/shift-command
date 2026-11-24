@@ -115,6 +115,7 @@ const (
 	PhaseExtractor
 	Gate
 	Resonator
+	Radiant
 
 	UnitTypeCount
 )
@@ -208,7 +209,7 @@ func (d UnitDef) Armed() bool { return d.Weapon.Damage > 0 }
 // and Shell): while one is on, the sim swaps the unit's def for Shifted(),
 // so every stat lookup sees the mode without special cases. A mode with a
 // Cooldown is instead an instant ability cast with SHIFT (Pounce, Brood
-// Burst).
+// Burst, and Phase).
 type Mode struct {
 	Name, Base string  // shifted and base mode names, e.g. "Artillery" / "Tank"
 	Desc       string  // one-line effect summary for tooltips
@@ -232,11 +233,16 @@ type Mode struct {
 	FlySpeed float64
 
 	// Instant abilities.
-	Cooldown    float64  // > 0: cast on SHIFT, then wait this many seconds
-	Leap        float64  // leap at an enemy up to this far away (tiles)
-	LeapDamage  float64  // damage dealt on landing
-	Summon      UnitType // summon SummonCount of this type around the caster
-	SummonCount int
+	Cooldown      float64  // > 0: cast on SHIFT, then wait this many seconds
+	Leap          float64  // leap at an enemy up to this far away (tiles)
+	LeapDamage    float64  // damage dealt on landing
+	Summon        UnitType // summon SummonCount of this type around the caster
+	SummonCount   int
+	PhaseDuration float64 // phase out for this many seconds
+	PhaseRadius   float64 // radius of a group phase cast
+	DashRange     float64 // dash toward a visible enemy within this range
+	BlinkRange    float64 // blink forward by this distance
+	LongPhase     bool    // phase movement ignores terrain
 }
 
 // Cast reports whether the mode is an instant ability rather than a toggle.
@@ -461,36 +467,42 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		Crystals: 50, Supply: 1, BuildTime: 12,
 		HP: 25, Shield: 25, ArmorType: Light, Radius: 0.34, Speed: 2.8, Sight: 7, Worker: true,
 		Weapon: Weapon{Damage: 5, Type: Normal, Range: 0.2, Cooldown: 1.2},
+		Shift:  &Mode{Name: "Phase", Desc: "Become untouchable and pass through units for 2s · 10s cooldown", Cooldown: 10, PhaseDuration: 2},
 	},
 	Warden: {
 		Type: Warden, Faction: Phasebound, Name: "Warden", Role: "Shielded melee warrior",
 		Crystals: 100, Supply: 2, BuildTime: 24,
 		HP: 90, Shield: 60, Armor: 1, ArmorType: Light, Radius: 0.45, Speed: 2.9, Sight: 8,
 		Weapon: Weapon{Damage: 9, Type: Normal, Range: 0.3, Cooldown: 1.0},
+		Shift:  &Mode{Name: "Phase Dash", Desc: "Dash to a nearby enemy while phased for 2s · 10s cooldown", Cooldown: 10, PhaseDuration: 2, DashRange: 4.5},
 	},
 	Glint: {
 		Type: Glint, Faction: Phasebound, Name: "Glint", Role: "Fast raider and scout, bonus vs workers",
 		Crystals: 100, Flux: 25, Supply: 2, BuildTime: 22,
 		HP: 60, Shield: 40, ArmorType: Light, Radius: 0.4, Speed: 4.5, Sight: 10,
 		Weapon: Weapon{Damage: 6, Type: Normal, Range: 1.5, Cooldown: 0.8, VsWorker: 8},
+		Shift:  &Mode{Name: "Long Phase", Desc: "Become untouchable, pass through units and cliffs for 4s · 10s cooldown", Cooldown: 10, PhaseDuration: 4, LongPhase: true},
 	},
 	Seer: {
 		Type: Seer, Faction: Phasebound, Name: "Seer", Role: "Ranged psionic bolts, bonus vs Armored",
 		Crystals: 125, Flux: 50, Supply: 2, BuildTime: 28,
 		HP: 50, Shield: 70, ArmorType: Light, Radius: 0.42, Speed: 2.6, Sight: 9,
 		Weapon: Weapon{Damage: 14, Type: Explosive, Range: 6, Cooldown: 1.6},
+		Shift:  &Mode{Name: "Phase Blink", Desc: "Blink forward and become untouchable for 2s · 10s cooldown", Cooldown: 10, PhaseDuration: 2, BlinkRange: 4},
 	},
 	Conduit: {
 		Type: Conduit, Faction: Phasebound, Name: "Conduit", Role: "Support: restores allies' shields",
 		Crystals: 50, Flux: 150, Supply: 2, BuildTime: 30,
 		HP: 80, Shield: 80, Armor: 1, ArmorType: Armored, Radius: 0.5, Speed: 2.6, Sight: 9,
 		HealRate: 12, HealRange: 4, ShieldHeal: true,
+		Shift: &Mode{Name: "Phase Field", Desc: "Phase nearby allies for 3s · 30s cooldown", Cooldown: 30, PhaseDuration: 3, PhaseRadius: 4},
 	},
 	Monolith: {
 		Type: Monolith, Faction: Phasebound, Name: "Monolith", Role: "Heavy ranged siege",
 		Crystals: 300, Flux: 200, Supply: 6, BuildTime: 50,
 		HP: 220, Shield: 180, Armor: 2, ArmorType: Armored, Radius: 0.9, Speed: 1.8, Sight: 10,
 		Weapon: Weapon{Damage: 32, Type: Explosive, Range: 9, Cooldown: 2.6, Splash: 1},
+		Shift:  &Mode{Name: "Phase", Desc: "Become untouchable and pass through units for 2s · 10s cooldown", Cooldown: 10, PhaseDuration: 2},
 	},
 	Spire: {
 		Type: Spire, Faction: Phasebound, Name: "Spire", Role: "HQ: trains Drifters, cargo drop-off",
@@ -526,6 +538,14 @@ var unitDefs = [UnitTypeCount]UnitDef{
 		Building: true, Size: 3, Trains: []UnitType{Conduit, Monolith}, Requires: []UnitType{Gate},
 		SelfBuild: true, Warped: true, NeedsPower: true,
 	},
+	Radiant: {
+		Type: Radiant, Faction: Phasebound, Name: "Radiant", Role: "Fused Seers: high-shield psionic artillery",
+		Supply: 4,
+		HP:     100, Shield: 250, Armor: 2, ArmorType: Armored, Radius: 0.75, Speed: 2.2, Sight: 9,
+		Weapon:   Weapon{Damage: 24, Type: Explosive, Range: 3.5, Cooldown: 1.5, Splash: 1.5},
+		Requires: []UnitType{Resonator},
+		Shift:    &Mode{Name: "Phase", Desc: "Become untouchable and pass through units for 2s · 10s cooldown", Cooldown: 10, PhaseDuration: 2},
+	},
 }
 
 // Brood tuning.
@@ -541,8 +561,11 @@ const (
 const (
 	// ShieldDelay is how long (seconds) shields wait after damage before
 	// they recharge at ShieldRegen per second.
-	ShieldDelay = 7
-	ShieldRegen = 2
+	ShieldDelay          = 7
+	ShieldRegen          = 2
+	WarpResearchCrystals = 150
+	WarpResearchFlux     = 150
+	WarpResearchTime     = 60
 )
 
 // broodForms is what a Spawn can morph into, in command-card order.

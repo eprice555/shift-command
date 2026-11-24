@@ -12,20 +12,22 @@ import (
 type CommandKind uint8
 
 const (
-	CmdMove       CommandKind = iota // move to Point, ignoring enemies
-	CmdAttackMove                    // move to Point, engaging enemies on the way
-	CmdAttack                        // attack Target
-	CmdStop                          // drop all orders
-	CmdHold                          // drop all orders and hold position
-	CmdSpawn                         // debug: spawn Count × Type at Point
-	CmdGather                        // workers: gather Res
-	CmdBuild                         // one worker: build Type at tile (TX, TY)
-	CmdTrain                         // buildings: queue Type at the least busy one
-	CmdCancel                        // first building: cancel construction or queue entry Index (-1 = last); else all cocoons
-	CmdRally                         // buildings: rally new units to Point (or Res)
-	CmdAssist                        // workers: construct/repair Target or bank cargo there; others move to it
-	CmdShift                         // toggle SHIFT modes (Index -1), or set mode Index (0 base, 1 shifted)
-	CmdMorph                         // Brood: re-morph one selected unit into Type
+	CmdMove         CommandKind = iota // move to Point, ignoring enemies
+	CmdAttackMove                      // move to Point, engaging enemies on the way
+	CmdAttack                          // attack Target
+	CmdStop                            // drop all orders
+	CmdHold                            // drop all orders and hold position
+	CmdSpawn                           // debug: spawn Count × Type at Point
+	CmdGather                          // workers: gather Res
+	CmdBuild                           // one worker: build Type at tile (TX, TY)
+	CmdTrain                           // buildings: queue Type at the least busy one
+	CmdCancel                          // first building: cancel construction or queue entry Index (-1 = last); else all cocoons
+	CmdRally                           // buildings: rally new units to Point (or Res)
+	CmdAssist                          // workers: construct/repair Target or bank cargo there; others move to it
+	CmdShift                           // toggle SHIFT modes (Index -1), or set mode Index (0 base, 1 shifted)
+	CmdMorph                           // Brood: re-morph one selected unit into Type
+	CmdFuse                            // Phasebound: fuse two selected Seers into a Radiant
+	CmdResearchWarp                    // Phasebound: research warp-in at Anchors
 )
 
 // Command is a player instruction. Commands are the only way input reaches
@@ -84,6 +86,12 @@ func (w *World) apply(c *Command) {
 		if c.Type < faction.UnitTypeCount {
 			w.remorphOne(c.Player, all, c.Type)
 		}
+		return
+	case CmdFuse:
+		w.fuse(c.Player, all)
+		return
+	case CmdResearchWarp:
+		w.researchWarp(c.Player, all)
 		return
 	case CmdRally:
 		for _, b := range all {
